@@ -9,7 +9,6 @@ import AdmZipLike from './unzip.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, '../../data');
-const DRY = process.argv.includes('--dry');
 
 // filename -> ISO date (all files are June 2026)
 const FILE_DATES = {
@@ -96,7 +95,9 @@ function extractMonth(label) {
   return null;
 }
 
-async function run() {
+// Parse the daily .docx files into `allocations`. Pass { dry: true } to
+// preview without writing. Returns the number of allocations inserted.
+export async function importDocx({ dry: DRY = false } = {}) {
   const conn = await pool.getConnection();
 
   // Lookups
@@ -318,8 +319,7 @@ async function run() {
   if (DRY) {
     console.log('\n--dry: nothing written.');
     conn.release();
-    await pool.end();
-    return;
+    return 0;
   }
 
   // wipe existing allocations for these dates, then insert
@@ -333,10 +333,12 @@ async function run() {
   }
   console.log(`✅ Inserted ${allAllocs.length} allocations.`);
   conn.release();
-  await pool.end();
+  return allAllocs.length;
 }
 
-run().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// CLI entry point: `node import/parse-docx.js [--dry]`
+if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('import/parse-docx.js')) {
+  importDocx({ dry: process.argv.includes('--dry') })
+    .then(() => pool.end())
+    .catch((e) => { console.error(e); process.exit(1); });
+}

@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from './db/pool.js';
+import { initDb } from './db/init.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import authRoutes from './routes/auth.js';
@@ -64,4 +65,9 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+  // Auto-load the database on first boot (for hosts without shell access).
+  // Runs in the background so startup is never blocked.
+  initDb();
+});

@@ -88,7 +88,7 @@ const BATCHES = [
   ['German B2', 'GERMAN', 1, 'B2', null],
 ];
 
-async function run() {
+export async function seedReference() {
   const conn = await pool.getConnection();
   try {
     // Programs
@@ -176,11 +176,12 @@ async function run() {
     console.log('   Default logins:  admin / admin123   |   viewer / viewer123');
   } finally {
     conn.release();
-    await pool.end();
   }
 }
 
-run().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// CLI entry point: `node db/seed-reference.js`
+if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('db/seed-reference.js')) {
+  seedReference()
+    .then(() => pool.end())
+    .catch((e) => { console.error(e); process.exit(1); });
+}
