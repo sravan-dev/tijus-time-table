@@ -152,12 +152,14 @@ async function run() {
     // Default admin + viewer users
     const adminHash = await bcrypt.hash('admin123', 10);
     const viewerHash = await bcrypt.hash('viewer123', 10);
+    const terenceHash = await bcrypt.hash('Terence@2026', 10);
     await conn.query(
       `INSERT INTO users (username, password_hash, full_name, role) VALUES
         ('admin', ?, 'Allocation Admin', 'admin'),
-        ('viewer', ?, 'Viewer', 'viewer')
+        ('viewer', ?, 'Viewer', 'viewer'),
+        ('terence@tijusacademy.com', ?, 'Terence G', 'admin')
        ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash)`,
-      [adminHash, viewerHash]
+      [adminHash, viewerHash, terenceHash]
     );
 
     // Default app settings (branding, timezone, SMTP placeholders)
