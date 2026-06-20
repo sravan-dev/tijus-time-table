@@ -1,0 +1,18 @@
+{
+  "name": "tijus-time-table",
+  "version": "1.0.0",
+  "description": "Tijus Academy timetable & allocation app (React + Express + MySQL)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "npm --prefix server install && npm --prefix client install",
+    "build": "npm --prefix client install && npm --prefix client run build",
+    "db:setup": "npm --prefix server run db:setup",
+    "db:migrate": "npm --prefix server run db:migrate",
+    "start": "node server/index.js",
+    "deploy:build": "npm run setup && npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

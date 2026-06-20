@@ -1,0 +1,25 @@
+{
+  "name": "tijus-timetable-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Tijus Academy timetable & allocation API",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "db:schema": "node db/run-schema.js",
+    "db:seed": "node db/seed-reference.js",
+    "db:import": "node import/parse-docx.js",
+    "db:migrate": "node db/migrate-faculty-users.js && node db/migrate-settings.js && node db/migrate-manager-role.js",
+    "db:setup": "npm run db:schema && npm run db:seed && npm run db:import"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.8.0",
+    "mysql2": "^3.11.0",
+    "nodemailer": "^9.0.1"
+  }
+}

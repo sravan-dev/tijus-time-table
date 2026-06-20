@@ -1,0 +1,193 @@
+:root {
+  /* Tijus brand palette, sampled from the logo */
+  --brand: #303070;          /* deep indigo (logo badge) */
+  --brand-dark: #232357;     /* darker indigo for hover/active */
+  --brand-tint: #ececf7;     /* light indigo wash */
+  --brand-tint-2: #f6f6fc;
+  --accent-yellow: #f5c518;
+  --accent-blue: #00a0e0;
+  --accent-green: #4fb950;
+  --accent-red: #ed1c24;
+
+  --bg: #f4f5fb;
+  --card: #ffffff;
+  --ink: #1f2233;
+  --muted: #6b7090;
+  --line: #e6e6f0;
+  --error: var(--accent-red);
+  --error-bg: #fdeef0;
+  --warn: #d97706;
+  --warn-bg: #fffbeb;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+a { color: var(--brand); text-decoration: none; }
+
+/* ---- Top bar ---- */
+.topbar {
+  display: flex; align-items: center; gap: 18px;
+  background: var(--brand); color: #fff;
+  padding: 8px 20px;
+  /* brand accent line using the four logo dot colors */
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(90deg,
+    var(--accent-yellow) 0 25%, var(--accent-blue) 25% 50%,
+    var(--accent-green) 50% 75%, var(--accent-red) 75% 100%) 1;
+}
+.topbar .brand {
+  display: flex; align-items: center;
+  line-height: 0; border-radius: 8px; transition: opacity .15s;
+}
+.topbar .brand:hover { opacity: .85; }
+.topbar .brand img { height: 52px; display: block; }
+.topbar nav { display: flex; gap: 4px; margin-left: 8px; }
+.topbar nav a {
+  color: #d4d4ee; padding: 6px 12px; border-radius: 6px; font-size: 14px;
+}
+.topbar nav a.active, .topbar nav a:hover { background: rgba(255,255,255,.16); color: #fff; }
+.topbar .spacer { flex: 1; }
+.topbar .who { font-size: 13px; opacity: .9; }
+
+/* ---- Notification bell ---- */
+.notif-wrap { position: relative; display: flex; align-items: center; }
+.notif-btn {
+  position: relative; background: transparent; border: none; color: #fff;
+  cursor: pointer; padding: 6px; border-radius: 8px; line-height: 0;
+}
+.notif-btn:hover { background: rgba(255,255,255,.16); }
+.notif-count {
+  position: absolute; top: -2px; right: -2px;
+  background: var(--accent-red); color: #fff; font-size: 11px; font-weight: 700;
+  min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--brand);
+}
+.notif-dot {
+  position: absolute; top: 2px; right: 2px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent-red); border: 2px solid var(--brand);
+}
+.notif-panel {
+  position: absolute; top: 44px; right: 0; width: 340px; max-width: 90vw;
+  background: #fff; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 18px 50px rgba(15,23,42,.28);
+  overflow: hidden; z-index: 60; animation: modal-pop .18s cubic-bezier(.22,1,.36,1);
+}
+.notif-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 12px 14px; font-weight: 700; border-bottom: 1px solid var(--line);
+}
+.notif-sub { font-size: 12px; font-weight: 500; color: var(--muted); }
+.notif-list { max-height: 60vh; overflow-y: auto; }
+.notif-item { display: flex; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+.notif-item:last-child { border-bottom: none; }
+.notif-item .dot { margin-top: 6px; flex-shrink: 0; }
+.notif-item .dot.info { background: var(--accent-blue); }
+.notif-title { font-size: 13.5px; font-weight: 600; }
+.notif-detail { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.notif-empty { padding: 26px 14px; text-align: center; color: var(--muted); font-size: 14px; }
+.btn {
+  border: none; border-radius: 6px; padding: 7px 14px; font-size: 14px;
+  cursor: pointer; background: var(--brand); color: #fff;
+}
+.btn.ghost { background: transparent; border: 1px solid #cbd5e1; color: var(--ink); }
+.topbar .btn.ghost { color: #fff; border-color: rgba(255,255,255,.5); }
+.topbar .btn.ghost:hover { background: rgba(255,255,255,.16); }
+.btn.sm { padding: 3px 9px; font-size: 12px; }
+.btn.danger { background: var(--error); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.page { padding: 18px 22px; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+
+/* ---- Controls ---- */
+.tabs { display: flex; gap: 6px; }
+.tab {
+  padding: 7px 16px; border-radius: 8px 8px 0 0; cursor: pointer;
+  background: var(--brand-tint); color: var(--brand-dark); font-weight: 600; font-size: 14px;
+}
+.tab.active { background: var(--brand); color: #fff; }
+select, input[type=date], input[type=text], input[type=number], input[type=password] {
+  padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px;
+  background: #fff;
+}
+
+/* ---- Timetable grid ---- */
+.grid-wrap { overflow-x: auto; background: var(--card); border-radius: 0 10px 10px 10px; border: 1px solid var(--line); }
+table.tt { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.tt th, table.tt td {
+  border: 1px solid var(--line); padding: 5px 7px; vertical-align: top; min-width: 96px;
+}
+table.tt thead th { background: var(--brand-tint); color: var(--brand-dark); position: sticky; top: 0; font-size: 12px; }
+table.tt td.batch, table.tt th.batch {
+  background: var(--brand-tint-2); font-weight: 700; white-space: nowrap; position: sticky; left: 0; min-width: 150px;
+}
+.cell { cursor: pointer; border-radius: 4px; padding: 3px; min-height: 30px; }
+.cell:hover { outline: 2px solid var(--brand); }
+.cell .act { font-weight: 700; }
+.cell .fac { color: var(--brand-dark); }
+.cell .room { color: var(--muted); }
+.cell.conf-error { background: var(--error-bg); outline: 1px solid var(--error); }
+.cell.conf-warn { background: var(--warn-bg); }
+.badge { display: inline-block; font-size: 12px; font-weight: 600; line-height: 1.5; padding: 2px 10px; border-radius: 11px; color: #fff; }
+/* keep the inline conflict marker inside grid cells compact */
+.cell .badge { font-size: 10px; padding: 0 6px; line-height: 1.4; }
+.badge.error { background: var(--error); }
+.badge.warn { background: var(--warn); }
+
+/* ---- Conflicts panel ---- */
+.conf-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.conf-list li { font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:7px; }
+.dot.error { background: var(--error); }
+.dot.warn { background: var(--warn); }
+
+/* ---- Modal ---- */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(15,23,42,.45);
+  display:flex; align-items:center; justify-content:center; z-index:50;
+  animation: modal-fade .18s ease-out;
+}
+.modal {
+  background:#fff; border-radius:12px; padding:22px; width:420px; max-width:92vw;
+  box-shadow: 0 18px 50px rgba(15,23,42,.28);
+  animation: modal-pop .22s cubic-bezier(.22,1,.36,1);
+  transform-origin: center;
+}
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-pop {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-bg, .modal { animation: none; }
+}
+.modal h3 { margin-top: 0; }
+.field { margin-bottom: 12px; display:flex; flex-direction:column; gap:4px; }
+.field label { font-size: 12px; color: var(--muted); font-weight:600; }
+
+/* ---- Login ---- */
+.login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; }
+.login-card { width: 340px; }
+.login-card h2 { margin: 0 0 4px; }
+.login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+.err { color: var(--error); font-size: 13px; }
+
+/* ---- Tables (manage) ---- */
+table.data { border-collapse: collapse; width: 100%; font-size: 14px; }
+table.data th, table.data td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+table.data thead th { background: #f8fafc; }
+
+@media print {
+  .topbar, .controls, .no-print { display: none !important; }
+  .grid-wrap { border: none; }
+}
