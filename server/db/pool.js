@@ -7,10 +7,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolve server/.env regardless of the current working directory.
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
+// If DB_SOCKET is set, connect via the MySQL unix socket (matches a
+// 'user'@'localhost' grant, avoiding the IPv6 ::1 / 127.0.0.1 host mismatch
+// seen on some shared hosts). Otherwise connect over TCP.
+const useSocket = process.env.DB_SOCKET;
+
 // Shared connection pool used across the API and the seed/import scripts.
 export const pool = mysql.createPool({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT) || 3306,
+  ...(useSocket
+    ? { socketPath: useSocket }
+    : { host: process.env.DB_HOST || '127.0.0.1', port: Number(process.env.DB_PORT) || 3306 }),
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'tijus_timetable',
