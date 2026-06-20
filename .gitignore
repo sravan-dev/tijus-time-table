@@ -18,3 +18,5 @@ _seed.html
 v.out
 v.err
 _*.out
+*.jpg
+*.jpeg
