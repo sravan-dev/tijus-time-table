@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
 
 export default function Manage() {
-  const [tab, setTab] = useState('batches');
+  // Keep the active sub-tab in the URL (?tab=) so a refresh preserves it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = ['batches', 'faculty', 'rooms'].includes(searchParams.get('tab'))
+    ? searchParams.get('tab') : 'batches';
+  const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
   return (
     <div className="page">
       <div className="tabs" style={{ marginBottom: 12 }}>
