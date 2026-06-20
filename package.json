@@ -8,6 +8,7 @@
     "build": "npm --prefix client install && npm --prefix client run build",
     "db:setup": "npm --prefix server run db:setup",
     "db:migrate": "npm --prefix server run db:migrate",
+    "db:load": "npm --prefix server run db:load",
     "start": "node server/index.js",
     "deploy:build": "npm run setup && npm run build"
   },
