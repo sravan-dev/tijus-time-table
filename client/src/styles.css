@@ -98,7 +98,7 @@ a { color: var(--brand); text-decoration: none; }
 .btn.ghost { background: transparent; border: 1px solid #cbd5e1; color: var(--ink); }
 .topbar .btn.ghost { color: #fff; border-color: rgba(255,255,255,.5); }
 .topbar .btn.ghost:hover { background: rgba(255,255,255,.16); }
-.btn.sm { padding: 3px 9px; font-size: 12px; }
+.btn.sm { padding: 6px 13px; font-size: 13px; }
 .btn.danger { background: var(--error); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
@@ -113,9 +113,24 @@ a { color: var(--brand); text-decoration: none; }
   background: var(--brand-tint); color: var(--brand-dark); font-weight: 600; font-size: 14px;
 }
 .tab.active { background: var(--brand); color: #fff; }
-select, input[type=date], input[type=text], input[type=number], input[type=password] {
-  padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px;
-  background: #fff;
+select, input[type=date], input[type=text], input[type=number], input[type=password], input[type=email], input:not([type]) {
+  padding: 8px 11px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
+  background: #fff; color: var(--ink);
+  transition: border-color .15s, box-shadow .15s;
+}
+/* form fields (login, modals, settings) stack vertically and fill their column */
+.field input, .field select { width: 100%; }
+.login-card input { width: 100%; }
+/* consistent, intentional focus state (replaces the default square outline) */
+select:focus, input:focus {
+  outline: none; border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 160, 224, .22);
+}
+/* stop Chrome's autofill from repainting the field a different colour */
+input:-webkit-autofill,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  box-shadow: 0 0 0 1000px #fff inset;
 }
 
 /* ---- Timetable grid ---- */

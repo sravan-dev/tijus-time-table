@@ -35,7 +35,7 @@ export default function Login() {
         <div className="sub" style={{ textAlign: 'center' }}>Timetable &amp; Allocation</div>
         <div className="field">
           <label>Username</label>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+          <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
         </div>
         <div className="field">
           <label>Password</label>
