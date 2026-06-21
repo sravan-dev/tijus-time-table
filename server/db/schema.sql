@@ -3,6 +3,8 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS ticket_messages;
+DROP TABLE IF EXISTS tickets;
 DROP TABLE IF EXISTS allocations;
 DROP TABLE IF EXISTS faculty_leave;
 DROP TABLE IF EXISTS room_blocks;
@@ -138,3 +140,28 @@ CREATE TABLE allocations (
 -- Link faculty logins to their tutor record (added here as faculty is defined above).
 ALTER TABLE users
   ADD CONSTRAINT fk_users_faculty FOREIGN KEY (faculty_id) REFERENCES faculty(id) ON DELETE SET NULL;
+
+-- Support tickets: tutors raise them, admins reply and manage status.
+CREATE TABLE tickets (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT NOT NULL,                 -- the user (usually a tutor) who raised it
+  subject    VARCHAR(160) NOT NULL,
+  status     ENUM('open','answered','closed') NOT NULL DEFAULT 'open',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_tickets_user (user_id),
+  INDEX idx_tickets_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per message in a ticket's conversation thread (first row is the body).
+CREATE TABLE ticket_messages (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  ticket_id  INT NOT NULL,
+  user_id    INT NOT NULL,                 -- author of this message
+  body       TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE,
+  INDEX idx_tmsg_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -79,6 +79,31 @@ router.get('/', async (req, res) => {
       });
   }
 
+  // Tickets — admins are alerted to open tickets needing a reply; everyone else
+  // is told when one of their own tickets has been answered.
+  if (role === 'admin') {
+    const [tickets] = await pool.query(
+      `SELECT t.id, t.subject, t.updated_at, u.full_name, u.username
+         FROM tickets t JOIN users u ON u.id = t.user_id
+        WHERE t.status = 'open' ORDER BY t.updated_at DESC LIMIT 10`);
+    for (const t of tickets)
+      items.push({
+        id: `tk-${t.id}`, level: 'warn', type: 'ticket',
+        title: `${t.full_name || t.username} raised a ticket`,
+        detail: t.subject, date: t.updated_at,
+      });
+  } else {
+    const [tickets] = await pool.query(
+      `SELECT id, subject, updated_at FROM tickets
+        WHERE user_id = ? AND status = 'answered' ORDER BY updated_at DESC LIMIT 10`,
+      [req.user.id]);
+    for (const t of tickets)
+      items.push({
+        id: `tka-${t.id}`, level: 'info', type: 'ticket',
+        title: 'Your ticket was answered', detail: t.subject, date: t.updated_at,
+      });
+  }
+
   res.json(items);
 });
 

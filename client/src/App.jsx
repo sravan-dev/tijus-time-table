@@ -10,6 +10,7 @@ import Users from './pages/Users';
 import Settings from './pages/Settings';
 import MySchedule from './pages/MySchedule';
 import MyLeaves from './pages/MyLeaves';
+import Tickets from './pages/Tickets';
 
 // Landing route depends on role.
 const homeFor = (role) => (role === 'faculty' ? '/my-schedule' : '/timetable');
@@ -29,6 +30,7 @@ function Shell({ children }) {
             <>
               <NavLink to="/my-schedule">My Schedule</NavLink>
               <NavLink to="/my-leaves">My Leaves</NavLink>
+              <NavLink to="/tickets">Support</NavLink>
             </>
           ) : (
             <>
@@ -37,6 +39,7 @@ function Shell({ children }) {
               <NavLink to="/schedule">Leave &amp; Blocks</NavLink>
               {isAdmin && <NavLink to="/users">Users</NavLink>}
               {isAdmin && <NavLink to="/settings">Settings</NavLink>}
+              <NavLink to="/tickets">Tickets</NavLink>
               {/* a manager who is also a tutor gets their personal views too */}
               {hasSelfSchedule && <NavLink to="/my-schedule">My Schedule</NavLink>}
               {hasSelfSchedule && <NavLink to="/my-leaves">My Leaves</NavLink>}
@@ -85,6 +88,9 @@ export default function App() {
       {/* faculty self-service */}
       <Route path="/my-schedule" element={<RoleRoute allow={['faculty']} selfSchedule><MySchedule /></RoleRoute>} />
       <Route path="/my-leaves" element={<RoleRoute allow={['faculty']} selfSchedule><MyLeaves /></RoleRoute>} />
+
+      {/* support tickets — any signed-in role can raise; admins manage & reply */}
+      <Route path="/tickets" element={<RoleRoute allow={['admin', 'manager', 'viewer', 'faculty']}><Tickets /></RoleRoute>} />
 
       <Route path="*" element={<Navigate to={user ? homeFor(user.role) : '/login'} replace />} />
     </Routes>

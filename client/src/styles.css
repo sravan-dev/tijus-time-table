@@ -113,16 +113,17 @@ a { color: var(--brand); text-decoration: none; }
   background: var(--brand-tint); color: var(--brand-dark); font-weight: 600; font-size: 14px;
 }
 .tab.active { background: var(--brand); color: #fff; }
-select, input[type=date], input[type=text], input[type=number], input[type=password], input[type=email], input:not([type]) {
+select, textarea, input[type=date], input[type=text], input[type=number], input[type=password], input[type=email], input:not([type]) {
   padding: 8px 11px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
   background: #fff; color: var(--ink);
   transition: border-color .15s, box-shadow .15s;
 }
+textarea { font-family: inherit; resize: vertical; width: 100%; }
 /* form fields (login, modals, settings) stack vertically and fill their column */
-.field input, .field select { width: 100%; }
+.field input, .field select, .field textarea { width: 100%; }
 .login-card input { width: 100%; }
 /* consistent, intentional focus state (replaces the default square outline) */
-select:focus, input:focus {
+select:focus, input:focus, textarea:focus {
   outline: none; border-color: var(--accent-blue);
   box-shadow: 0 0 0 3px rgba(0, 160, 224, .22);
 }
@@ -196,6 +197,44 @@ table.tt td.batch, table.tt th.batch {
 .login-card h2 { margin: 0 0 4px; }
 .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
 .err { color: var(--error); font-size: 13px; }
+
+/* ---- Tickets ---- */
+.ticket-layout { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 16px; align-items: start; }
+.ticket-list { min-width: 0; }
+.ticket-row {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: transparent; border: none; border-bottom: 1px solid var(--line);
+  padding: 11px 14px; color: var(--ink);
+}
+.ticket-row:last-child { border-bottom: none; }
+.ticket-row:hover { background: var(--brand-tint-2); }
+.ticket-row.active { background: var(--brand-tint); }
+.ticket-row-top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.ticket-subj { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-row-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+.tk-badge { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 11px; }
+.tk-badge.open     { background: var(--warn-bg);   color: var(--warn); }
+.tk-badge.answered { background: #e7f6ee;          color: var(--accent-green); }
+.tk-badge.closed   { background: #eceef5;          color: var(--muted); }
+
+.ticket-thread { min-width: 0; }
+.ticket-empty { color: var(--muted); text-align: center; padding: 40px 16px; }
+.ticket-detail-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; margin-bottom: 8px; }
+
+.ticket-messages { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.tk-msg { background: var(--brand-tint-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+.tk-msg.own { background: var(--brand-tint); }
+.tk-msg-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 3px; }
+.tk-msg-head .tk-time { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+.tk-role { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  background: var(--brand); color: #fff; padding: 1px 6px; border-radius: 8px; }
+.tk-body { font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
+.ticket-reply { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+
+@media (max-width: 760px) {
+  .ticket-layout { grid-template-columns: 1fr; }
+}
 
 /* ---- Tables (manage) ---- */
 table.data { border-collapse: collapse; width: 100%; font-size: 14px; }

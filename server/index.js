@@ -17,6 +17,7 @@ import userRoutes from './routes/users.js';
 import myRoutes from './routes/my.js';
 import notificationRoutes from './routes/notifications.js';
 import settingsRoutes from './routes/settings.js';
+import ticketRoutes from './routes/tickets.js';
 
 // Load server/.env regardless of the working directory (so it works whether
 // started from the repo root or the server folder). On hosts that inject env
@@ -46,6 +47,7 @@ app.use('/api/schedule', scheduleRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/my', myRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/tickets', ticketRoutes);
 
 // Unmatched API routes return JSON (not the SPA fallback below).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

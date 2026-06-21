@@ -35,6 +35,31 @@ export async function initDb() {
     try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS faculty_id INT NULL'); } catch { /* exists */ }
     try { await pool.query('ALTER TABLE faculty ADD COLUMN IF NOT EXISTS email VARCHAR(160) NULL'); } catch { /* exists */ }
 
+    // Support tickets (tutors raise, admins reply) — added in a later release, so
+    // create them here for databases provisioned before the feature existed.
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS tickets (
+         id         INT AUTO_INCREMENT PRIMARY KEY,
+         user_id    INT NOT NULL,
+         subject    VARCHAR(160) NOT NULL,
+         status     ENUM('open','answered','closed') NOT NULL DEFAULT 'open',
+         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         INDEX idx_tickets_user (user_id),
+         INDEX idx_tickets_status (status)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS ticket_messages (
+         id         INT AUTO_INCREMENT PRIMARY KEY,
+         ticket_id  INT NOT NULL,
+         user_id    INT NOT NULL,
+         body       TEXT NOT NULL,
+         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         INDEX idx_tmsg_ticket (ticket_id)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
+
     // 3. Seed reference data (programs, rooms, faculty, batches, users, settings)
     //    only if not present.
     const [[{ n: progs }]] = await pool.query('SELECT COUNT(*) AS n FROM programs');
