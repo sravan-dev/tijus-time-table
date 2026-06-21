@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
 import AllocationModal from '../components/AllocationModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
+  // Keep the active program tab in the URL (?program=) so a refresh preserves it.
+  const [searchParams, setSearchParams] = useSearchParams();
   const [programs, setPrograms] = useState([]);
   const [programId, setProgramId] = useState(null);
   const [dates, setDates] = useState([]);
@@ -22,7 +25,9 @@ export default function Timetable() {
         api.get('/allocations/dates'),
       ]);
       setPrograms(progs);
-      setProgramId(progs[0]?.id);
+      const wanted = searchParams.get('program');
+      const match = progs.find((p) => p.code === wanted);
+      setProgramId((match || progs[0])?.id);
       const isoDates = ds.map((d) => d.slice(0, 10));
       setDates(isoDates);
       setDate(isoDates[0] || '');
@@ -58,6 +63,11 @@ export default function Timetable() {
 
   const confCount = Object.keys(data.conflicts).length;
 
+  function selectProgram(p) {
+    setProgramId(p.id);
+    setSearchParams({ program: p.code }, { replace: true });
+  }
+
   return (
     <div className="page">
       <div className="row controls" style={{ marginBottom: 12 }}>
@@ -65,7 +75,7 @@ export default function Timetable() {
           {programs.map((p) => (
             <div key={p.id}
               className={'tab' + (p.id === programId ? ' active' : '')}
-              onClick={() => setProgramId(p.id)}>
+              onClick={() => selectProgram(p)}>
               {p.code}
             </div>
           ))}
