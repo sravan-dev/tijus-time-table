@@ -191,8 +191,8 @@ table.tt td.batch, table.tt th.batch {
 .field label { font-size: 12px; color: var(--muted); font-weight:600; }
 
 /* ---- Login ---- */
-.login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; }
-.login-card { width: 340px; }
+.login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding: 16px; }
+.login-card { width: 340px; max-width: 100%; }
 .login-card h2 { margin: 0 0 4px; }
 .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
 .err { color: var(--error); font-size: 13px; }
@@ -201,6 +201,32 @@ table.tt td.batch, table.tt th.batch {
 table.data { border-collapse: collapse; width: 100%; font-size: 14px; }
 table.data th, table.data td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }
 table.data thead th { background: #f8fafc; }
+
+/* ---- Responsive ---- */
+@media (max-width: 760px) {
+  /* Top bar: keep brand + account on the first row, wrap nav to its own
+     scrollable row instead of overflowing off-screen. */
+  .topbar { flex-wrap: wrap; gap: 8px 12px; padding: 8px 14px; }
+  .topbar .brand img { height: 40px; }
+  .topbar nav {
+    order: 10; width: 100%; margin-left: 0;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .topbar nav a { white-space: nowrap; }
+  .topbar .who { font-size: 12px; }
+
+  .page { padding: 14px 14px; }
+
+  /* Manage/Users/Settings tables scroll horizontally rather than squashing. */
+  table.data { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
+@media (max-width: 420px) {
+  /* Hide the secondary identity text on very small phones to save the row. */
+  .topbar .who { display: none; }
+  .modal { padding: 18px; }
+}
 
 @media print {
   .topbar, .controls, .no-print { display: none !important; }
