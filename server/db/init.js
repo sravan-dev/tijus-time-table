@@ -60,17 +60,23 @@ export async function initDb() {
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
 
+    // An admin "Clear all data" reset pins this flag so we never repopulate the
+    // database from seeds/docx on a later restart (which would undo the reset).
+    const [[seedFlag]] = await pool.query(
+      "SELECT svalue FROM app_settings WHERE skey = 'seed_disabled'");
+    const seedDisabled = seedFlag?.svalue === '1';
+
     // 3. Seed reference data (programs, rooms, faculty, batches, users, settings)
     //    only if not present.
     const [[{ n: progs }]] = await pool.query('SELECT COUNT(*) AS n FROM programs');
-    if (progs === 0) {
+    if (progs === 0 && !seedDisabled) {
       console.log('[init] Seeding reference data…');
       await seedReference();
     }
 
     // 4. Import the daily timetables only if there are no allocations yet.
     const [[{ n: allocs }]] = await pool.query('SELECT COUNT(*) AS n FROM allocations');
-    if (allocs === 0) {
+    if (allocs === 0 && !seedDisabled) {
       console.log('[init] Importing timetables from data/*.docx …');
       const inserted = await importDocx();
       console.log(`[init] Imported ${inserted} sessions.`);

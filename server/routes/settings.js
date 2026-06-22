@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { getSettings, setSettings } from '../services/settings.js';
 import { sendMail } from '../services/mailer.js';
+import { dumpDatabase, clearTimetableData } from '../db/maintenance.js';
 
 const router = Router();
 
@@ -51,6 +52,34 @@ router.post('/test-email', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// ---- Database management (admin) ----------------------------------------
+
+// Download a full MySQL .sql backup of the database.
+router.get('/db/export', async (_req, res) => {
+  try {
+    const sql = await dumpDatabase();
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/sql; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="tijus-timetable-${stamp}.sql"`);
+    res.send(sql);
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Export failed' });
+  }
+});
+
+// Wipe all timetable + reference data (keeps users and settings). Guarded by a
+// confirmation token so the destructive call can't fire by accident.
+router.post('/db/clear', async (req, res) => {
+  if (req.body?.confirm !== 'CLEAR')
+    return res.status(400).json({ error: 'Confirmation token required' });
+  try {
+    await clearTimetableData();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Clear failed' });
   }
 });
 

@@ -17,6 +17,7 @@ export default function Settings() {
   const [saved, setSaved] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [dbBusy, setDbBusy] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -62,6 +63,39 @@ export default function Settings() {
     } catch (e) {
       setErr(e.response?.data?.error || 'Could not send test email');
     }
+  }
+
+  async function exportDb() {
+    setErr(''); setSaved(''); setDbBusy(true);
+    try {
+      const res = await api.get('/settings/db/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tijus-timetable-${new Date().toISOString().slice(0, 10)}.sql`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setSaved('Database exported.');
+    } catch (e) {
+      setErr('Export failed');
+    } finally { setDbBusy(false); }
+  }
+
+  async function clearDb() {
+    const typed = prompt(
+      'This permanently deletes ALL timetable and reference data — sessions, batches, ' +
+      'faculty, rooms, leave and room blocks. User accounts and settings are kept. ' +
+      'This CANNOT be undone (export a backup first).\n\nType CLEAR to confirm:');
+    if (typed !== 'CLEAR') return;
+    setErr(''); setSaved(''); setDbBusy(true);
+    try {
+      await api.post('/settings/db/clear', { confirm: 'CLEAR' });
+      setSaved('All timetable and reference data cleared. Users and settings were kept.');
+    } catch (e) {
+      setErr(e.response?.data?.error || 'Clear failed');
+    } finally { setDbBusy(false); }
   }
 
   return (
@@ -147,6 +181,39 @@ export default function Settings() {
           <input type="text" value={s.smtp_from || ''} onChange={set('smtp_from')} placeholder="Tijus Academy <noreply@tijus.com>" />
         </div>
         <button className="btn ghost" onClick={testEmail}>Send test email…</button>
+      </div>
+
+      {/* Database management */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>Database Management</div>
+
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 600 }}>Export database</div>
+            <div className="sub" style={{ color: 'var(--muted)', fontSize: 13 }}>
+              Download a full MySQL <code>.sql</code> backup you can re-import.
+            </div>
+          </div>
+          <button className="btn ghost" onClick={exportDb} disabled={dbBusy}>
+            {dbBusy ? 'Working…' : 'Export .sql'}
+          </button>
+        </div>
+
+        <hr style={{ border: 'none', borderTop: '1px solid var(--line)', margin: '14px 0' }} />
+
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 600, color: 'var(--error)' }}>Clear all data</div>
+            <div className="sub" style={{ color: 'var(--muted)', fontSize: 13 }}>
+              Permanently deletes all timetable and reference data (sessions, batches,
+              faculty, rooms, leave, blocks). User accounts and settings are kept.
+              This cannot be undone — export a backup first.
+            </div>
+          </div>
+          <button className="btn danger" onClick={clearDb} disabled={dbBusy}>
+            {dbBusy ? 'Working…' : 'Clear all data'}
+          </button>
+        </div>
       </div>
 
       <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
