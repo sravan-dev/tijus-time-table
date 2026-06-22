@@ -200,7 +200,7 @@ table.tt td.batch, table.tt th.batch {
 
 /* ---- Toasts ---- */
 .toast-wrap {
-  position: fixed; bottom: 22px; right: 22px; z-index: 100;
+  position: fixed; top: 22px; right: 22px; z-index: 100;
   display: flex; flex-direction: column; gap: 10px; max-width: 92vw;
 }
 .toast {
@@ -213,7 +213,7 @@ table.tt td.batch, table.tt th.batch {
 }
 .toast.error { border-left-color: var(--error); }
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(-12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
