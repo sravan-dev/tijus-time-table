@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
+import { useToast } from '../components/Toast';
 
 export default function Manage() {
   // Keep the active sub-tab in the URL (?tab=) so a refresh preserves it.
@@ -27,6 +28,7 @@ export default function Manage() {
 
 function Batches() {
   const { canEdit } = useAuth();
+  const toast = useToast();
   const [rows, setRows] = useState([]);
   const [programs, setPrograms] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -43,9 +45,14 @@ function Batches() {
     await api.post('/batches', { name, program_id: programs[0]?.id, student_count: 0 });
     load();
   }
-  async function save(b) {
-    await api.put(`/batches/${b.id}`, b);
-    load();
+  async function save(b, msg) {
+    try {
+      await api.put(`/batches/${b.id}`, b);
+      load();
+      if (msg) toast(msg);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Update failed', 'error');
+    }
   }
   async function del(id) {
     if (!confirm('Delete batch?')) return;
@@ -69,13 +76,16 @@ function Batches() {
               <td>
                 {canEdit ? (
                   <input type="number" style={{ width: 60 }} defaultValue={b.student_count}
-                    onBlur={(e) => save({ ...b, student_count: Number(e.target.value) })} />
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (v !== b.student_count) save({ ...b, student_count: v }, 'Students updated');
+                    }} />
                 ) : b.student_count}
               </td>
               <td>
                 {canEdit ? (
                   <select defaultValue={b.home_room_id || ''}
-                    onChange={(e) => save({ ...b, home_room_id: e.target.value || null })}>
+                    onChange={(e) => save({ ...b, home_room_id: e.target.value || null }, 'Home room updated')}>
                     <option value="">—</option>
                     {rooms.map((r) => <option key={r.id} value={r.id}>{r.code}</option>)}
                   </select>
@@ -93,6 +103,7 @@ function Batches() {
 
 function Faculty() {
   const { canEdit } = useAuth();
+  const toast = useToast();
   const [rows, setRows] = useState([]);
   const load = () => api.get('/faculty').then((r) => setRows(r.data));
   useEffect(() => { load(); }, []);
@@ -102,8 +113,13 @@ function Faculty() {
   }
   async function saveEmail(f, email) {
     if (email === (f.email || '')) return;
-    await api.put(`/faculty/${f.id}`, { ...f, email: email || null });
-    load();
+    try {
+      await api.put(`/faculty/${f.id}`, { ...f, email: email || null });
+      load();
+      toast('Email updated');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Update failed', 'error');
+    }
   }
   return (
     <div className="card">
@@ -137,6 +153,7 @@ function Faculty() {
 
 function Rooms() {
   const { canEdit } = useAuth();
+  const toast = useToast();
   const [rows, setRows] = useState([]);
   const load = () => api.get('/classrooms').then((r) => setRows(r.data));
   useEffect(() => { load(); }, []);
@@ -145,8 +162,13 @@ function Rooms() {
     if (code) { await api.post('/classrooms', { code, capacity: 0 }); load(); }
   }
   async function setCap(r, capacity) {
-    await api.put(`/classrooms/${r.id}`, { ...r, capacity: Number(capacity) });
-    load();
+    try {
+      await api.put(`/classrooms/${r.id}`, { ...r, capacity: Number(capacity) });
+      load();
+      toast('Capacity updated');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Update failed', 'error');
+    }
   }
   return (
     <div className="card">
@@ -163,7 +185,10 @@ function Rooms() {
               <td>
                 {canEdit ? (
                   <input type="number" style={{ width: 70 }} defaultValue={r.capacity}
-                    onBlur={(e) => setCap(r, e.target.value)} />
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (v !== r.capacity) setCap(r, v);
+                    }} />
                 ) : r.capacity}
               </td>
             </tr>

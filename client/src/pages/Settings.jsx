@@ -44,7 +44,9 @@ export default function Settings() {
     try {
       const payload = { ...s };
       delete payload.smtp_has_password;
-      if (!payload.smtp_password) delete payload.smtp_password; // keep existing
+      delete payload.resend_has_key;
+      if (!payload.smtp_password) delete payload.smtp_password;     // keep existing
+      if (!payload.resend_api_key) delete payload.resend_api_key;   // keep existing
       await api.put('/settings', payload);
       await reloadBranding();
       setSaved('Settings saved.');
@@ -148,38 +150,63 @@ export default function Settings() {
         <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
           Used to email faculty their schedule after allocations.
         </div>
-        <div className="row">
-          <div className="field" style={{ flex: 2 }}>
-            <label>SMTP host</label>
-            <input type="text" value={s.smtp_host || ''} onChange={set('smtp_host')} placeholder="smtp.gmail.com" />
-          </div>
-          <div className="field" style={{ flex: 1 }}>
-            <label>Port</label>
-            <input type="text" value={s.smtp_port || ''} onChange={set('smtp_port')} placeholder="587" />
-          </div>
-          <div className="field" style={{ width: 120 }}>
-            <label>SSL (465)</label>
-            <select value={s.smtp_secure || '0'} onChange={set('smtp_secure')}>
-              <option value="0">No (TLS)</option>
-              <option value="1">Yes</option>
-            </select>
-          </div>
+
+        <div className="field">
+          <label>Email provider</label>
+          <select value={s.mail_provider || 'smtp'} onChange={set('mail_provider')}>
+            <option value="smtp">SMTP server</option>
+            <option value="resend">Resend API</option>
+          </select>
         </div>
-        <div className="row">
-          <div className="field" style={{ flex: 1 }}>
-            <label>Username</label>
-            <input type="text" value={s.smtp_user || ''} onChange={set('smtp_user')} />
-          </div>
-          <div className="field" style={{ flex: 1 }}>
-            <label>Password {s.smtp_has_password === '1' && <span className="room">(set — leave blank to keep)</span>}</label>
-            <input type="password" value={s.smtp_password || ''} onChange={set('smtp_password')}
-              placeholder={s.smtp_has_password === '1' ? '••••••••' : ''} />
-          </div>
-        </div>
+
         <div className="field">
           <label>From address</label>
           <input type="text" value={s.smtp_from || ''} onChange={set('smtp_from')} placeholder="Tijus Academy <noreply@tijus.com>" />
         </div>
+
+        {(s.mail_provider || 'smtp') === 'resend' ? (
+          <>
+            <div className="field">
+              <label>Resend API key {s.resend_has_key === '1' && <span className="room">(set — leave blank to keep)</span>}</label>
+              <input type="password" value={s.resend_api_key || ''} onChange={set('resend_api_key')}
+                placeholder={s.resend_has_key === '1' ? '••••••••' : 're_...'} />
+            </div>
+            <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
+              The From address must use a domain verified in your Resend account.
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="row">
+              <div className="field" style={{ flex: 2 }}>
+                <label>SMTP host</label>
+                <input type="text" value={s.smtp_host || ''} onChange={set('smtp_host')} placeholder="smtp.gmail.com" />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Port</label>
+                <input type="text" value={s.smtp_port || ''} onChange={set('smtp_port')} placeholder="587" />
+              </div>
+              <div className="field" style={{ width: 120 }}>
+                <label>SSL (465)</label>
+                <select value={s.smtp_secure || '0'} onChange={set('smtp_secure')}>
+                  <option value="0">No (TLS)</option>
+                  <option value="1">Yes</option>
+                </select>
+              </div>
+            </div>
+            <div className="row">
+              <div className="field" style={{ flex: 1 }}>
+                <label>Username</label>
+                <input type="text" value={s.smtp_user || ''} onChange={set('smtp_user')} />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Password {s.smtp_has_password === '1' && <span className="room">(set — leave blank to keep)</span>}</label>
+                <input type="password" value={s.smtp_password || ''} onChange={set('smtp_password')}
+                  placeholder={s.smtp_has_password === '1' ? '••••••••' : ''} />
+              </div>
+            </div>
+          </>
+        )}
         <button className="btn ghost" onClick={testEmail}>Send test email…</button>
       </div>
 

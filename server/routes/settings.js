@@ -18,23 +18,29 @@ router.get('/public', async (_req, res) => {
 
 router.use(requireAuth, requireAdmin);
 
-// Full settings for the admin Settings page. Never return the SMTP password;
-// expose only whether one is set.
+// Full settings for the admin Settings page. Never return secrets (SMTP
+// password, Resend API key); expose only whether each is set.
 router.get('/', async (_req, res) => {
   const s = await getSettings();
-  const { smtp_password, ...rest } = s;
-  res.json({ ...rest, smtp_has_password: smtp_password ? '1' : '0' });
+  const { smtp_password, resend_api_key, ...rest } = s;
+  res.json({
+    ...rest,
+    smtp_has_password: smtp_password ? '1' : '0',
+    resend_has_key: resend_api_key ? '1' : '0',
+  });
 });
 
 router.put('/', async (req, res) => {
   const allowed = [
     'app_title', 'app_logo', 'timezone',
+    'mail_provider',
     'smtp_host', 'smtp_port', 'smtp_secure', 'smtp_user', 'smtp_from', 'smtp_enabled',
   ];
   const patch = {};
   for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
-  // password only updated when a non-empty value is supplied
+  // secrets only updated when a non-empty value is supplied (blank = keep existing)
   if (req.body.smtp_password) patch.smtp_password = req.body.smtp_password;
+  if (req.body.resend_api_key) patch.resend_api_key = req.body.resend_api_key;
   await setSettings(patch);
   res.json({ ok: true });
 });
