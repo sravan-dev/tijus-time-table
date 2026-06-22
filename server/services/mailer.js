@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer';
 import { getSettings } from './settings.js';
 
 // Send via an SMTP server using nodemailer.
-async function sendViaSmtp(s, { from, to, subject, html, text }) {
+async function sendViaSmtp(s, { from, to, subject, html, text, replyTo }) {
   if (!s.smtp_host) throw new Error('SMTP host is not configured');
   const transport = nodemailer.createTransport({
     host: s.smtp_host,
@@ -10,12 +10,12 @@ async function sendViaSmtp(s, { from, to, subject, html, text }) {
     secure: s.smtp_secure === '1',
     auth: s.smtp_user ? { user: s.smtp_user, pass: s.smtp_password } : undefined,
   });
-  return transport.sendMail({ from: from || s.smtp_user, to, subject, html, text });
+  return transport.sendMail({ from: from || s.smtp_user, to, subject, html, text, replyTo });
 }
 
 // Send via the Resend HTTP API (https://resend.com). The "from" must use a
 // domain verified in the Resend dashboard.
-async function sendViaResend(s, { from, to, subject, html, text }) {
+async function sendViaResend(s, { from, to, subject, html, text, replyTo }) {
   if (!s.resend_api_key) throw new Error('Resend API key is not configured');
   if (!from) throw new Error('A From address is required for Resend');
   const res = await fetch('https://api.resend.com/emails', {
@@ -24,7 +24,7 @@ async function sendViaResend(s, { from, to, subject, html, text }) {
       Authorization: `Bearer ${s.resend_api_key}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from, to, subject, html, text }),
+    body: JSON.stringify({ from, to, subject, html, text, reply_to: replyTo || undefined }),
   });
   if (!res.ok) {
     let msg = `Resend error ${res.status}`;
@@ -34,14 +34,14 @@ async function sendViaResend(s, { from, to, subject, html, text }) {
   return res.json();
 }
 
-export async function sendMail({ to, subject, html, text }) {
+export async function sendMail({ to, subject, html, text, replyTo }) {
   const s = await getSettings();
   if (s.smtp_enabled !== '1') throw new Error('Email is disabled in Settings');
   const from = s.smtp_from || s.smtp_user;
   const provider = s.mail_provider === 'resend' ? 'resend' : 'smtp';
   return provider === 'resend'
-    ? sendViaResend(s, { from, to, subject, html, text })
-    : sendViaSmtp(s, { from, to, subject, html, text });
+    ? sendViaResend(s, { from, to, subject, html, text, replyTo })
+    : sendViaSmtp(s, { from, to, subject, html, text, replyTo });
 }
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

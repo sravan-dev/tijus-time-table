@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, NavLink, Link, useNavigate } from 'react-route
 import { useAuth } from './auth';
 import { useBranding } from './branding';
 import NotificationBell from './components/NotificationBell';
+import SupportButton from './components/SupportButton';
 import Login from './pages/Login';
 import Timetable from './pages/Timetable';
 import Manage from './pages/Manage';
@@ -56,6 +57,7 @@ function Shell({ children }) {
         </button>
       </header>
       {children}
+      <SupportButton />
     </>
   );
 }
