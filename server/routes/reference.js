@@ -43,6 +43,49 @@ router.put('/faculty/:id', requireEditor, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Faculty capabilities (tutor x program x module) ---------------------
+const MODULES = ['LISTENING', 'READING', 'SPEAKING', 'WRITING', 'GENERAL'];
+
+router.get('/capabilities', async (req, res) => {
+  const { program_id, faculty_id } = req.query;
+  const where = [];
+  const params = [];
+  if (program_id) { where.push('fc.program_id = ?'); params.push(program_id); }
+  if (faculty_id) { where.push('fc.faculty_id = ?'); params.push(faculty_id); }
+  const [rows] = await pool.query(
+    `SELECT fc.id, fc.faculty_id, f.name AS faculty_name,
+            fc.program_id, p.code AS program_code, fc.module
+       FROM faculty_capabilities fc
+       JOIN faculty f  ON f.id = fc.faculty_id
+       JOIN programs p ON p.id = fc.program_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY p.code, f.name, fc.module`,
+    params
+  );
+  res.json(rows);
+});
+
+router.post('/capabilities', requireEditor, async (req, res) => {
+  const { faculty_id, program_id, module } = req.body;
+  if (!faculty_id || !program_id || !MODULES.includes(module)) {
+    return res.status(400).json({ error: 'faculty_id, program_id and a valid module are required' });
+  }
+  await pool.query(
+    'INSERT IGNORE INTO faculty_capabilities (faculty_id, program_id, module) VALUES (?, ?, ?)',
+    [faculty_id, program_id, module]
+  );
+  res.json({ ok: true });
+});
+
+router.delete('/capabilities', requireEditor, async (req, res) => {
+  const { faculty_id, program_id, module } = req.body;
+  await pool.query(
+    'DELETE FROM faculty_capabilities WHERE faculty_id = ? AND program_id = ? AND module = ?',
+    [faculty_id, program_id, module]
+  );
+  res.json({ ok: true });
+});
+
 // ---- Classrooms ----------------------------------------------------------
 router.get('/classrooms', async (_req, res) => {
   const [rows] = await pool.query('SELECT * FROM classrooms ORDER BY code');

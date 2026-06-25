@@ -9,7 +9,7 @@
     "db:schema": "node db/run-schema.js",
     "db:seed": "node db/seed-reference.js",
     "db:import": "node import/parse-docx.js",
-    "db:migrate": "node db/migrate-faculty-users.js && node db/migrate-settings.js && node db/migrate-manager-role.js",
+    "db:migrate": "node db/migrate-faculty-users.js && node db/migrate-settings.js && node db/migrate-manager-role.js && node db/migrate-capabilities.js",
     "db:load": "node db/load.js",
     "db:setup": "npm run db:schema && npm run db:seed && npm run db:import"
   },

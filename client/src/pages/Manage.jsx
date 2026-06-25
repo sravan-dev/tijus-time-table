@@ -7,13 +7,13 @@ import { useToast } from '../components/Toast';
 export default function Manage() {
   // Keep the active sub-tab in the URL (?tab=) so a refresh preserves it.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = ['batches', 'faculty', 'rooms'].includes(searchParams.get('tab'))
+  const tab = ['batches', 'faculty', 'modules', 'rooms'].includes(searchParams.get('tab'))
     ? searchParams.get('tab') : 'batches';
   const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
   return (
     <div className="page">
       <div className="tabs" style={{ marginBottom: 12 }}>
-        {['batches', 'faculty', 'rooms'].map((t) => (
+        {['batches', 'faculty', 'modules', 'rooms'].map((t) => (
           <div key={t} className={'tab' + (t === tab ? ' active' : '')} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
           </div>
@@ -21,6 +21,7 @@ export default function Manage() {
       </div>
       {tab === 'batches' && <Batches />}
       {tab === 'faculty' && <Faculty />}
+      {tab === 'modules' && <Modules />}
       {tab === 'rooms' && <Rooms />}
     </div>
   );
@@ -143,6 +144,102 @@ function Faculty() {
                 ) : (f.email || '—')}
               </td>
               <td>{f.active ? 'Yes' : 'No'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Which modules each tutor can teach, per program (from the TUTORS & MODULE
+// sheet). Fluency has no module split, so it uses a single "Assigned" column.
+const MODULE_COLS = [
+  { code: 'LISTENING', label: 'L' },
+  { code: 'READING', label: 'R' },
+  { code: 'SPEAKING', label: 'S' },
+  { code: 'WRITING', label: 'W' },
+];
+
+function Modules() {
+  const { canEdit } = useAuth();
+  const toast = useToast();
+  const [programs, setPrograms] = useState([]);
+  const [faculty, setFaculty] = useState([]);
+  const [programId, setProgramId] = useState(null);
+  const [caps, setCaps] = useState([]); // capability rows for the active program
+
+  const program = programs.find((p) => p.id === programId);
+  const isFluency = program?.code === 'FLUENCY';
+  const cols = isFluency ? [{ code: 'GENERAL', label: 'Assigned' }] : MODULE_COLS;
+  // Fast lookup of existing capabilities: "facultyId:MODULE".
+  const have = new Set(caps.map((c) => `${c.faculty_id}:${c.module}`));
+
+  const loadCaps = (pid) => api.get('/capabilities', { params: { program_id: pid } })
+    .then((r) => setCaps(r.data));
+
+  useEffect(() => {
+    api.get('/faculty').then((r) => setFaculty(r.data.filter((f) => f.active)));
+    api.get('/programs').then((r) => {
+      setPrograms(r.data);
+      if (r.data.length) setProgramId(r.data[0].id);
+    });
+  }, []);
+  useEffect(() => { if (programId) loadCaps(programId); }, [programId]);
+
+  async function toggle(facultyId, module, on) {
+    try {
+      if (on) await api.post('/capabilities', { faculty_id: facultyId, program_id: programId, module });
+      else await api.delete('/capabilities', { data: { faculty_id: facultyId, program_id: programId, module } });
+      await loadCaps(programId);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Update failed', 'error');
+    }
+  }
+
+  // Show tutors that teach this program first, then the rest (so admins can
+  // add a missing assignment). A tutor "teaches" it if they have any module.
+  const teaching = new Set(caps.map((c) => c.faculty_id));
+  const rows = [...faculty].sort((a, b) => {
+    const ta = teaching.has(a.id), tb = teaching.has(b.id);
+    if (ta !== tb) return ta ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+        <b>Modules by tutor</b>
+        <select value={programId || ''} onChange={(e) => setProgramId(Number(e.target.value))}>
+          {programs.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+        </select>
+      </div>
+      <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
+        Tick the modules each tutor can teach for <b>{program?.code}</b>.
+        {isFluency && ' Fluency has no module split — tick to assign the tutor.'}
+      </div>
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Tutor</th>
+            {cols.map((c) => <th key={c.code} style={{ textAlign: 'center' }}>{c.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((f) => (
+            <tr key={f.id}>
+              <td>{f.name}</td>
+              {cols.map((c) => {
+                const on = have.has(`${f.id}:${c.code}`);
+                return (
+                  <td key={c.code} style={{ textAlign: 'center' }}>
+                    {canEdit ? (
+                      <input type="checkbox" checked={on}
+                        onChange={(e) => toggle(f.id, c.code, e.target.checked)} />
+                    ) : (on ? '✓' : '')}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

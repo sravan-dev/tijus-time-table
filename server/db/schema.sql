@@ -6,6 +6,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS ticket_messages;
 DROP TABLE IF EXISTS tickets;
 DROP TABLE IF EXISTS allocations;
+DROP TABLE IF EXISTS faculty_capabilities;
 DROP TABLE IF EXISTS faculty_leave;
 DROP TABLE IF EXISTS room_blocks;
 DROP TABLE IF EXISTS time_slots;
@@ -90,6 +91,19 @@ CREATE TABLE activities (
   id        INT AUTO_INCREMENT PRIMARY KEY,
   code      VARCHAR(20) NOT NULL UNIQUE,
   name      VARCHAR(80) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Which programs + modules (Listening/Reading/Speaking/Writing) a tutor can
+-- teach. GENERAL is used for programs with no module split (e.g. Fluency).
+-- Sourced from the "TUTORS & MODULE" sheet; editable in Manage → Modules.
+CREATE TABLE faculty_capabilities (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  faculty_id  INT NOT NULL,
+  program_id  INT NOT NULL,
+  module      ENUM('LISTENING','READING','SPEAKING','WRITING','GENERAL') NOT NULL,
+  FOREIGN KEY (faculty_id) REFERENCES faculty(id)  ON DELETE CASCADE,
+  FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_capability (faculty_id, program_id, module)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Faculty leave (drives the "is faculty on leave" allocation rule)

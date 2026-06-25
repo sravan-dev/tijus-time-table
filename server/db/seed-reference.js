@@ -20,16 +20,52 @@ const CLASSROOMS = [
   ['A6', 20], ['D1', 0], ['D2', 20], ['T1', 0],
 ];
 
-// ---- Faculty (normalised; Suchitra/Suchithra treated as one) --------------
+// ---- Faculty (normalised; Suchitra/Suchithra & Besty/Betsy treated as one) -
 const FACULTY = [
   // OET
   'Deepthy', 'Suchithra', 'Haritha', 'Radhakrishnan', 'Gangalekshmi',
   'Goldy', 'Varsha', 'Vishnu', 'Anju', 'Amiya',
   // IELTS / PTE
   'Krishnanunni', 'Betsy', 'Akhila', 'Rissy', 'Stan', 'Farzana',
+  'Tintu', 'Jeslin', 'Ann',
   // German
   'Abin', 'Sneha', 'Krishnendu', 'Revathy', 'Archana', 'Akash', 'Athul',
 ];
+
+// ---- Faculty capabilities (from "TUTORS & MODULE" sheet) ------------------
+// programCode -> { canonicalFacultyName: [modules] }. An empty module list
+// means the program has no module split (Fluency) -> stored as GENERAL.
+export const CAPABILITIES = {
+  IELTS: {
+    Betsy: ['L', 'R', 'S', 'W'], Tintu: ['L', 'R', 'S', 'W'],
+    Akhila: ['L', 'R', 'S', 'W'], Jeslin: ['L', 'R', 'S', 'W'],
+    Farzana: ['L', 'R', 'S', 'W'], Stan: ['L', 'R', 'S', 'W'],
+    Rissy: ['L', 'R', 'S', 'W'], Vishnu: ['R', 'S'], Suchithra: ['R', 'S'],
+    Varsha: ['S'], Goldy: ['S'], Ann: ['L'],
+  },
+  OET: {
+    Varsha: ['S'], Suchithra: ['R', 'S'], Haritha: ['S', 'W'],
+    Radhakrishnan: ['W'], Vishnu: ['R', 'S'], Gangalekshmi: ['S'],
+    Amiya: ['L', 'S'], Goldy: ['S'], Anju: ['R', 'S'], Farzana: ['S'],
+    Ann: ['W'],
+  },
+  PTE: {
+    Farzana: ['L', 'R', 'S', 'W'], Stan: ['L', 'R', 'S', 'W'],
+    Rissy: ['L', 'R', 'S', 'W'], Ann: ['L', 'R', 'S', 'W'],
+  },
+  FLUENCY: {
+    Farzana: [], Vishnu: [], Goldy: [], Varsha: [], Gangalekshmi: [], Amiya: [],
+  },
+};
+
+// Short module codes -> stored enum values.
+export const MODULE_BY_CODE = {
+  L: 'LISTENING', R: 'READING', S: 'SPEAKING', W: 'WRITING',
+};
+
+// New tutors introduced by the "TUTORS & MODULE" sheet (not in the original
+// seed). Exported so a targeted live-DB apply can add just these.
+export const NEW_FACULTY = ['Tintu', 'Jeslin', 'Ann'];
 
 // ---- Activity / session types --------------------------------------------
 const ACTIVITIES = [
@@ -149,6 +185,25 @@ export async function seedReference() {
         [name, progByCode[pcode], count, room ? roomByCode[room] : null, exam]
       );
     }
+    // Faculty capabilities (tutor x program x module). Rebuilt from the sheet.
+    const [facRows] = await conn.query('SELECT id, name FROM faculty');
+    const facByName = Object.fromEntries(facRows.map((f) => [f.name, f.id]));
+    await conn.query('DELETE FROM faculty_capabilities');
+    for (const [pcode, tutors] of Object.entries(CAPABILITIES)) {
+      const pid = progByCode[pcode];
+      for (const [fname, codes] of Object.entries(tutors)) {
+        const fid = facByName[fname];
+        if (!pid || !fid) { console.warn(`  ⚠ skipped capability ${fname}/${pcode}`); continue; }
+        const modules = codes.length ? codes.map((c) => MODULE_BY_CODE[c]) : ['GENERAL'];
+        for (const m of modules) {
+          await conn.query(
+            'INSERT IGNORE INTO faculty_capabilities (faculty_id, program_id, module) VALUES (?, ?, ?)',
+            [fid, pid, m]
+          );
+        }
+      }
+    }
+
     // Default admin + viewer users
     const adminHash = await bcrypt.hash('admin123', 10);
     const viewerHash = await bcrypt.hash('viewer123', 10);
@@ -172,7 +227,7 @@ export async function seedReference() {
       await conn.query('INSERT IGNORE INTO app_settings (skey, svalue) VALUES (?, ?)', [k, v]);
     }
 
-    console.log('✅ Reference data seeded (programs, rooms, faculty, slots, activities, batches, users, settings).');
+    console.log('✅ Reference data seeded (programs, rooms, faculty, capabilities, slots, activities, batches, users, settings).');
     console.log('   Default logins:  admin / admin123   |   viewer / viewer123');
   } finally {
     conn.release();
