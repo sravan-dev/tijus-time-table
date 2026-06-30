@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../auth';
 import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
+import ReassignModal from '../components/ReassignModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
@@ -18,6 +19,8 @@ export default function Timetable() {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // {batchId, slotId} or allocation
   const [editingSlot, setEditingSlot] = useState(null); // time slot being re-timed
+  const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation }
+  const [reassigning, setReassigning] = useState(null); // allocation being reassigned
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
 
   // initial reference load
@@ -184,7 +187,12 @@ export default function Timetable() {
                         title={conf ? conf.map((c) => c.message).join('\n') : ''}
                         onClick={() => canEdit && setEditing(
                           a || { programId, date, batch_id: b.id, time_slot_id: s.id }
-                        )}>
+                        )}
+                        onContextMenu={(e) => {
+                          if (!canEdit || !a) return; // only admins, only real sessions
+                          e.preventDefault();
+                          setMenu({ x: e.clientX, y: e.clientY, allocation: a });
+                        }}>
                         {a ? (
                           <>
                             <div className="act">
@@ -228,6 +236,29 @@ export default function Timetable() {
           slot={editingSlot}
           onClose={() => setEditingSlot(null)}
           onSaved={() => { setEditingSlot(null); reloadSlots(); reload(); }}
+        />
+      )}
+
+      {menu && (
+        <div className="ctx-backdrop"
+          onClick={() => setMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
+          <div className="ctx-menu" style={{ top: menu.y, left: menu.x }} onClick={(e) => e.stopPropagation()}>
+            <button className="ctx-item"
+              onClick={() => { setReassigning(menu.allocation); setMenu(null); }}>
+              Reassign faculty…
+            </button>
+          </div>
+        </div>
+      )}
+
+      {reassigning && (
+        <ReassignModal
+          allocation={reassigning}
+          programId={programId}
+          dayAllocations={data.allocations}
+          onClose={() => setReassigning(null)}
+          onSaved={() => { setReassigning(null); reload(); }}
         />
       )}
     </div>
