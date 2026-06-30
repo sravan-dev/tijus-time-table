@@ -249,6 +249,24 @@ export async function importDocx({ dry: DRY = false } = {}) {
       const slots = slotsByProg[programId] || [];
       if (!slots.length) continue;
 
+      // The new standard grid dropped the historical "1.10-2.00" column (an
+      // always-empty lunch slot). The docx files still carry it, so locate it
+      // in this table's header and skip it when mapping columns onto slots,
+      // keeping the remaining columns aligned. (German grid is unchanged.)
+      let droppedColIndex = -1; // session-column index (0-based) to skip
+      if (progCode !== 'GERMAN') {
+        const header = rows[0] || [];
+        let hc = 0;
+        for (let ci = 0; ci < header.length; ci++) {
+          const span = header[ci].span || 1;
+          if (ci === 0) { hc += span; continue; }
+          // strip ALL whitespace: some tables label it "1.10- 2.00"
+          const hl = (header[ci].lines.join('') || '').replace(/\s+/g, '');
+          if (hl === '1.10-2.00') { droppedColIndex = hc - 1; break; }
+          hc += span;
+        }
+      }
+
       // data rows start after the header row (row 0)
       for (let ri = 1; ri < rows.length; ri++) {
         const cells = rows[ri];
@@ -276,9 +294,13 @@ export async function importDocx({ dry: DRY = false } = {}) {
           const cell = cells[ci];
           const span = cell.span || 1;
           if (ci === 0) { col += span; continue; } // batch / tutor column
-          const slotIndex = col - 1;
-          const slot = slots[slotIndex];
+          let slotIndex = col - 1;
           col += span;
+          if (droppedColIndex >= 0) {
+            if (slotIndex === droppedColIndex) continue;     // dropped lunch column
+            if (slotIndex > droppedColIndex) slotIndex -= 1; // shift later columns left
+          }
+          const slot = slots[slotIndex];
           const cellText = cell.lines.join(' ').replace(/\s+/g, ' ').trim();
           if (!cellText || !slot) continue;
           if (/^(BREAK|LUNCH BREAK|LUNCH)$/i.test(cellText)) continue;

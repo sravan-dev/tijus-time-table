@@ -82,15 +82,17 @@ const ACTIVITIES = [
 ];
 
 // ---- Time slots per program ----------------------------------------------
-// OET / IELTS / PTE / Fluency share the 8-column grid.
+// OET / IELTS / PTE / Fluency share the 7-session grid (updated timing sheet):
+// 1hr sessions with a 15-min break after the 2nd, a 45-min lunch after the
+// 4th, and a 10-min break before the last. migrate-timings.js moves existing
+// databases off the old 8-slot grid (dropping the empty "1.10-2.00" lunch col).
 const STANDARD_SLOTS = [
-  ['9.10-10.05', '09:10', '10:05'],
-  ['10.05-11.05', '10:05', '11:05'],
-  ['11.10-12.10', '11:10', '12:10'],
-  ['12.10-1.10', '12:10', '13:10'],
-  ['1.10-2.00', '13:10', '14:00'],
-  ['1.50-2.50', '13:50', '14:50'],
-  ['2.50-3.50', '14:50', '15:50'],
+  ['9.00-10.00', '09:00', '10:00'],
+  ['10.00-11.00', '10:00', '11:00'],
+  ['11.15-12.15', '11:15', '12:15'],
+  ['12.15-1.15', '12:15', '13:15'],
+  ['2.00-2.55', '14:00', '14:55'],
+  ['2.55-3.50', '14:55', '15:50'],
   ['4.00-5.00', '16:00', '17:00'],
 ];
 const GERMAN_SLOTS = [
