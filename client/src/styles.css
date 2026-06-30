@@ -191,6 +191,7 @@ table.tt td.batch, table.tt th.batch {
   .modal-bg, .modal { animation: none; }
 }
 .modal h3 { margin-top: 0; }
+.modal h3.modal-drag { cursor: move; touch-action: none; user-select: none; -webkit-user-select: none; }
 .field { margin-bottom: 12px; display:flex; flex-direction:column; gap:4px; }
 .field label { font-size: 12px; color: var(--muted); font-weight:600; }
 

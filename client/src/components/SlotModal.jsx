@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
 
 // Edit a single time slot's label and start/end times (admin only). The slot
 // is shared by every batch in the program's grid, so a change re-times the
 // whole column. Existing sessions keep their slot link.
+// The dialog can be dragged around by its title bar (pointer events: mouse + touch).
 export default function SlotModal({ slot, onClose, onSaved }) {
   const [form, setForm] = useState({
     label: slot.label ?? '',
@@ -13,6 +14,29 @@ export default function SlotModal({ slot, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // --- draggable: offset from the centred position ---
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const drag = useRef(null); // { startX, startY, baseX, baseY } while dragging
+
+  function startDrag(e) {
+    drag.current = { startX: e.clientX, startY: e.clientY, baseX: pos.x, baseY: pos.y };
+    e.preventDefault(); // avoid text selection while dragging
+  }
+  useEffect(() => {
+    function move(e) {
+      const d = drag.current;
+      if (!d) return;
+      setPos({ x: d.baseX + (e.clientX - d.startX), y: d.baseY + (e.clientY - d.startY) });
+    }
+    function stop() { drag.current = null; }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+    };
+  }, []);
 
   async function save() {
     if (!form.label.trim()) { setErr('A label is required'); return; }
@@ -32,8 +56,14 @@ export default function SlotModal({ slot, onClose, onSaved }) {
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Edit timing</h3>
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
+      >
+        <h3 className="modal-drag" onPointerDown={startDrag} title="Drag to move">
+          Edit timing
+        </h3>
         <div className="sub" style={{ marginBottom: 10 }}>
           Re-times this column for every batch in this program.
         </div>
