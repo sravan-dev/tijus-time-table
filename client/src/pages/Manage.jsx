@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
 import { useToast } from '../components/Toast';
+import SplitRoomModal from '../components/SplitRoomModal';
 
 export default function Manage() {
   // Keep the active sub-tab in the URL (?tab=) so a refresh preserves it.
@@ -252,6 +253,7 @@ function Rooms() {
   const { canEdit } = useAuth();
   const toast = useToast();
   const [rows, setRows] = useState([]);
+  const [splitting, setSplitting] = useState(null); // room being split
   const load = () => api.get('/classrooms').then((r) => setRows(r.data));
   useEffect(() => { load(); }, []);
   async function add() {
@@ -265,27 +267,6 @@ function Rooms() {
       toast('Capacity updated');
     } catch (e) {
       toast(e.response?.data?.error || 'Update failed', 'error');
-    }
-  }
-  // Split a room into two section sub-rooms (e.g. C1 -> C1-Front / C1-Back),
-  // for a partitioned class. Sections are normal rooms usable in the editor;
-  // capacity is split in half and editable afterwards.
-  async function split(r) {
-    const front = `${r.code}-Front`, back = `${r.code}-Back`;
-    if (rows.some((x) => x.code === front || x.code === back)) {
-      toast(`${r.code} already has Front/Back sections`, 'error');
-      return;
-    }
-    if (!confirm(`Split ${r.code} into two sections (${front} / ${back})?`)) return;
-    const half = Math.ceil((r.capacity || 0) / 2);
-    try {
-      await api.post('/classrooms', { code: front, capacity: half, notes: `Section of ${r.code}` });
-      await api.post('/classrooms', { code: back, capacity: (r.capacity || 0) - half, notes: `Section of ${r.code}` });
-      load();
-      toast(`Split ${r.code} into ${front} / ${back}`);
-    } catch (e) {
-      load();
-      toast(e.response?.data?.error || 'Could not split this room', 'error');
     }
   }
   async function del(r) {
@@ -326,7 +307,7 @@ function Rooms() {
               </td>
               {canEdit && (
                 <td>
-                  <button className="btn sm" onClick={() => split(r)}>Split</button>
+                  <button className="btn sm" onClick={() => setSplitting(r)}>Split</button>
                   <button className="btn sm danger" style={{ marginLeft: 6 }} onClick={() => del(r)}>Delete</button>
                 </td>
               )}
@@ -334,6 +315,19 @@ function Rooms() {
           ))}
         </tbody>
       </table>
+
+      {splitting && (
+        <SplitRoomModal
+          room={splitting}
+          existingCodes={rows.map((x) => x.code)}
+          onClose={() => setSplitting(null)}
+          onSaved={(n) => {
+            const code = splitting.code;
+            setSplitting(null); load();
+            toast(`Split ${code} into ${n} section${n > 1 ? 's' : ''}`);
+          }}
+        />
+      )}
     </div>
   );
 }
