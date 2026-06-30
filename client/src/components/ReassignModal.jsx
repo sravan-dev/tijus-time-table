@@ -8,20 +8,19 @@ const MODULE_BY_LETTER = { R: 'READING', W: 'WRITING', L: 'LISTENING', S: 'SPEAK
 // and capable of the activity's module (from the capability matrix).
 export default function ReassignModal({ allocation, programId, dayAllocations = [], onClose, onSaved }) {
   const [faculty, setFaculty] = useState([]);
-  const [caps, setCaps] = useState([]);
+  const [caps, setCaps] = useState(null); // null = not loaded / unavailable
   const [facultyId, setFacultyId] = useState(allocation.faculty_id ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // Load faculty and capabilities independently: capabilities are optional
+  // (the table may not exist on a DB that hasn't run db:migrate), and must
+  // never block the faculty list from loading.
   useEffect(() => {
-    (async () => {
-      const [f, c] = await Promise.all([
-        api.get('/faculty'),
-        api.get(`/capabilities?program_id=${programId}`),
-      ]);
-      setFaculty(f.data);
-      setCaps(c.data);
-    })();
+    api.get('/faculty').then(({ data }) => setFaculty(data)).catch(() => setFaculty([]));
+    api.get(`/capabilities?program_id=${programId}`)
+      .then(({ data }) => setCaps(data))
+      .catch(() => setCaps(null));
   }, [programId]);
 
   const module = MODULE_BY_LETTER[(allocation.activity_code || '')[0]?.toUpperCase()] || null;
@@ -35,9 +34,10 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
     return s;
   }, [dayAllocations, allocation]);
 
-  // faculty capable of this module (or GENERAL). null = no module -> don't mark
+  // faculty capable of this module (or GENERAL). null = no module or no
+  // capability data available -> don't mark anyone (still list every tutor).
   const capableIds = useMemo(() => {
-    if (!module) return null;
+    if (!module || !caps) return null;
     const s = new Set();
     for (const c of caps) if (c.module === module || c.module === 'GENERAL') s.add(c.faculty_id);
     return s;
@@ -100,7 +100,7 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
             <option value="">— unassigned —</option>
             {options.map((f) => {
               const free = !busyIds.has(f.id);
-              const capable = !capableIds || capableIds.has(f.id);
+              const capable = capableIds && capableIds.has(f.id); // only when data is available
               const tags = [capable ? '✓ capable' : null, free ? null : '• busy this slot'].filter(Boolean);
               return (
                 <option key={f.id} value={f.id}>
