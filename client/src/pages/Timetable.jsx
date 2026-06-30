@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
@@ -44,26 +44,38 @@ export default function Timetable() {
   }
   useEffect(() => { reloadSlots(); }, [programId]);
 
+  // Guard against out-of-order responses: only the most recent request may
+  // apply its result, so switching program tabs quickly (or leaving and
+  // returning) can't leave a previous program's sessions on screen.
+  const reqRef = useRef(0);
   async function reload() {
     if (!date || !programId) return;
+    const reqId = ++reqRef.current;
     setLoading(true);
     const { data } = await api.get(`/allocations?date=${date}&program_id=${programId}`);
+    if (reqId !== reqRef.current) return; // a newer request superseded this one
     setData(data);
     setLoading(false);
   }
-  useEffect(() => { reload(); }, [date, programId]);
+  // Clear the grid immediately on program/date change so stale rows never linger.
+  useEffect(() => { setData({ allocations: [], conflicts: {} }); reload(); }, [date, programId]);
 
-  // build batch rows × slot columns matrix
-  const { batches, matrix } = useMemo(() => {
+  // build batch rows × slot columns matrix. Only rows for the selected program
+  // and the current slot grid are kept, so another program's sessions (e.g.
+  // German's batch-less, per-tutor rows) can never render as blank "—" rows.
+  const slotIds = useMemo(() => new Set(slots.map((s) => s.id)), [slots]);
+  const { batches } = useMemo(() => {
     const byBatch = new Map();
     for (const a of data.allocations) {
+      if (programId && a.program_id !== programId) continue;      // other program leaked in
+      if (slotIds.size && !slotIds.has(a.time_slot_id)) continue; // slot not in this grid
       const key = a.batch_id ?? `nb-${a.id}`;
       if (!byBatch.has(key))
         byBatch.set(key, { id: a.batch_id, name: a.batch_name || '—', count: a.student_count, cells: {} });
       byBatch.get(key).cells[a.time_slot_id] = a;
     }
-    return { batches: [...byBatch.values()], matrix: byBatch };
-  }, [data]);
+    return { batches: [...byBatch.values()] };
+  }, [data, programId, slotIds]);
 
   // faculty present in the current day/program, for the filter dropdown
   const facultyOptions = useMemo(() => {
