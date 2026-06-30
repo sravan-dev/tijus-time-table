@@ -114,7 +114,8 @@ extra CORS or URL config is needed in production.
    npm run setup
    npm run build
    npm run db:setup     # creates schema, seeds reference data, imports the docx
-   npm run db:migrate   # adds faculty/manager roles + settings (safe to re-run)
+   npm run db:migrate   # roles + settings + capability matrix + new 7-session
+                        # timetable grid; re-times the standard slots (safe to re-run)
    ```
 5. **Start / restart** the app from the panel. Visit your domain — you should see
    the login page.
