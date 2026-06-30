@@ -141,6 +141,9 @@ table.tt th, table.tt td {
   border: 1px solid var(--line); padding: 5px 7px; vertical-align: top; min-width: 96px;
 }
 table.tt thead th { background: var(--brand-tint); color: var(--brand-dark); position: sticky; top: 0; font-size: 12px; }
+table.tt thead th.slot-edit { cursor: pointer; }
+table.tt thead th.slot-edit:hover { background: var(--brand); color: #fff; }
+@media print { table.tt thead th.slot-edit { cursor: auto; } }
 table.tt td.batch, table.tt th.batch {
   background: var(--brand-tint-2); font-weight: 700; white-space: nowrap; position: sticky; left: 0; min-width: 150px;
 }

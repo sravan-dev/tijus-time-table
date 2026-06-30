@@ -21,6 +21,27 @@ router.get('/slots', async (req, res) => {
   res.json(rows);
 });
 
+// Edit a slot's label and start/end times (admins). Existing allocations keep
+// their time_slot_id, so they simply re-display under the new label/time.
+router.put('/slots/:id', requireEditor, async (req, res) => {
+  const { label, start_time = null, end_time = null } = req.body;
+  if (!label || !String(label).trim()) {
+    return res.status(400).json({ error: 'A label is required' });
+  }
+  try {
+    await pool.query(
+      'UPDATE time_slots SET label = ?, start_time = ?, end_time = ? WHERE id = ?',
+      [String(label).trim(), start_time || null, end_time || null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Another slot in this program already uses that label' });
+    }
+    throw e;
+  }
+});
+
 router.get('/activities', async (_req, res) => {
   const [rows] = await pool.query('SELECT * FROM activities ORDER BY name');
   res.json(rows);

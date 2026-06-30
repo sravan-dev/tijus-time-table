@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
 import AllocationModal from '../components/AllocationModal';
+import SlotModal from '../components/SlotModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
@@ -16,6 +17,7 @@ export default function Timetable() {
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // {batchId, slotId} or allocation
+  const [editingSlot, setEditingSlot] = useState(null); // time slot being re-timed
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
 
   // initial reference load
@@ -36,10 +38,11 @@ export default function Timetable() {
   }, []);
 
   // slots for the chosen program
-  useEffect(() => {
+  function reloadSlots() {
     if (!programId) return;
     api.get(`/slots?program_id=${programId}`).then(({ data }) => setSlots(data));
-  }, [programId]);
+  }
+  useEffect(() => { reloadSlots(); }, [programId]);
 
   async function reload() {
     if (!date || !programId) return;
@@ -141,7 +144,14 @@ export default function Timetable() {
           <thead>
             <tr>
               <th className="batch">Batch</th>
-              {slots.map((s) => <th key={s.id}>{s.label}</th>)}
+              {slots.map((s) => (
+                <th key={s.id}
+                  className={canEdit ? 'slot-edit' : undefined}
+                  title={canEdit ? 'Click to edit this timing' : undefined}
+                  onClick={() => canEdit && setEditingSlot(s)}>
+                  {s.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -198,6 +208,14 @@ export default function Timetable() {
           date={date}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); reload(); }}
+        />
+      )}
+
+      {editingSlot && (
+        <SlotModal
+          slot={editingSlot}
+          onClose={() => setEditingSlot(null)}
+          onSaved={() => { setEditingSlot(null); reloadSlots(); reload(); }}
         />
       )}
     </div>
