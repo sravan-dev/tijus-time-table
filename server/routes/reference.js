@@ -124,5 +124,18 @@ router.put('/classrooms/:id', requireEditor, async (req, res) => {
     [code, capacity, notes, req.params.id]);
   res.json({ ok: true });
 });
+router.delete('/classrooms/:id', requireEditor, async (req, res) => {
+  // allocations.classroom_id is ON DELETE SET NULL and room_blocks cascade, but
+  // batches.home_room_id is RESTRICT — so refuse if a batch still uses it.
+  try {
+    await pool.query('DELETE FROM classrooms WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.code === 'ER_ROW_IS_REFERENCED') {
+      return res.status(409).json({ error: 'This room is set as a batch home room — clear that first.' });
+    }
+    throw e;
+  }
+});
 
 export default router;

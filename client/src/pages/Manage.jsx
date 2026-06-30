@@ -267,14 +267,50 @@ function Rooms() {
       toast(e.response?.data?.error || 'Update failed', 'error');
     }
   }
+  // Split a room into two section sub-rooms (e.g. C1 -> C1-Front / C1-Back),
+  // for a partitioned class. Sections are normal rooms usable in the editor;
+  // capacity is split in half and editable afterwards.
+  async function split(r) {
+    const front = `${r.code}-Front`, back = `${r.code}-Back`;
+    if (rows.some((x) => x.code === front || x.code === back)) {
+      toast(`${r.code} already has Front/Back sections`, 'error');
+      return;
+    }
+    if (!confirm(`Split ${r.code} into two sections (${front} / ${back})?`)) return;
+    const half = Math.ceil((r.capacity || 0) / 2);
+    try {
+      await api.post('/classrooms', { code: front, capacity: half, notes: `Section of ${r.code}` });
+      await api.post('/classrooms', { code: back, capacity: (r.capacity || 0) - half, notes: `Section of ${r.code}` });
+      load();
+      toast(`Split ${r.code} into ${front} / ${back}`);
+    } catch (e) {
+      load();
+      toast(e.response?.data?.error || 'Could not split this room', 'error');
+    }
+  }
+  async function del(r) {
+    if (!confirm(`Delete room ${r.code}? Sessions using it will be left without a room.`)) return;
+    try {
+      await api.delete(`/classrooms/${r.id}`);
+      load();
+      toast(`Deleted ${r.code}`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Delete failed', 'error');
+    }
+  }
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
         <b>Classrooms ({rows.length})</b>
         {canEdit && <button className="btn sm" onClick={add}>+ Add</button>}
       </div>
+      {canEdit && (
+        <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
+          <b>Split</b> divides a room into <b>Front</b>/<b>Back</b> sections you can allocate separately.
+        </div>
+      )}
       <table className="data">
-        <thead><tr><th>Code</th><th>Capacity</th></tr></thead>
+        <thead><tr><th>Code</th><th>Capacity</th>{canEdit && <th>Section</th>}</tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
@@ -288,6 +324,12 @@ function Rooms() {
                     }} />
                 ) : r.capacity}
               </td>
+              {canEdit && (
+                <td>
+                  <button className="btn sm" onClick={() => split(r)}>Split</button>
+                  <button className="btn sm danger" style={{ marginLeft: 6 }} onClick={() => del(r)}>Delete</button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
