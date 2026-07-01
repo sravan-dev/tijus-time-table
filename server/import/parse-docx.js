@@ -1,4 +1,7 @@
-// Parses the 7 daily timetable .docx files into the `allocations` table.
+// Parses the daily timetable .docx files in ../data into the `allocations`
+// table. Files are named "<WEEKDAY> <DD>.docx" (e.g. "MONDAY 22.docx"); they are
+// discovered automatically and their full dates resolved (see resolveDate), so a
+// fresh set of sheets can simply be dropped into data/ without editing this file.
 // Run with `--dry` to preview parsed rows without writing to the DB.
 import fs from 'fs';
 import path from 'path';
@@ -10,16 +13,58 @@ import AdmZipLike from './unzip.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, '../../data');
 
-// filename -> ISO date (all files are June 2026)
-const FILE_DATES = {
-  'MONDAY 8.docx': '2026-06-08',
-  'TUESDAY 9.docx': '2026-06-09',
-  'WEDNESDAY 10.docx': '2026-06-10',
-  'THURSDAY 11.docx': '2026-06-11',
-  'FRIDAY 12.docx': '2026-06-12',
-  'MONDAY 15.docx': '2026-06-15',
-  'TUESDAY 16.docx': '2026-06-16',
-};
+// The academy's sheets are named by weekday + day-of-month only ("MONDAY 22"),
+// carrying no month or year. We resolve the month by searching outward from an
+// anchor for the calendar month whose DDth actually falls on the named weekday —
+// which fills in the month AND validates the filename. The anchor defaults to
+// June 2026 (the current season) and can be overridden with the IMPORT_YEAR /
+// IMPORT_MONTH env vars for a set that has rolled into a new month or year.
+const IMPORT_YEAR = Number(process.env.IMPORT_YEAR) || 2026;
+const ANCHOR_MONTH = Number(process.env.IMPORT_MONTH) || 6; // June
+
+const WEEKDAYS = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
+
+// "MONDAY 22.docx" -> "2026-06-22". Returns null for files that aren't weekday
+// sheets (so stray .docx in data/ are ignored). Throws if a weekday sheet's day
+// doesn't land on that weekday in any month near the anchor.
+function resolveDate(filename) {
+  const m = filename
+    .toUpperCase()
+    .match(/\b(SUN|MON|TUE|WED|THU|FRI|SAT)[A-Z]*\b[^0-9]*(\d{1,2})\b/);
+  if (!m) return null;
+  const wanted = WEEKDAYS[m[1]];
+  const day = Number(m[2]);
+  // search order: anchor month, then +1, -1, +2, -2, ... up to ±6 months
+  for (let k = 0; k <= 6; k++) {
+    for (const off of k === 0 ? [0] : [k, -k]) {
+      let month = ANCHOR_MONTH + off;
+      let year = IMPORT_YEAR;
+      while (month < 1) { month += 12; year--; }
+      while (month > 12) { month -= 12; year++; }
+      const d = new Date(Date.UTC(year, month - 1, day));
+      if (d.getUTCMonth() === month - 1 && d.getUTCDay() === wanted) {
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+  }
+  throw new Error(
+    `Cannot resolve a date for "${filename}": no month near ${IMPORT_YEAR}-` +
+    `${String(ANCHOR_MONTH).padStart(2, '0')} has day ${day} on a ${m[1]}. ` +
+    `Set IMPORT_YEAR / IMPORT_MONTH if this set is for a different period.`
+  );
+}
+
+// Discover every "<WEEKDAY> <DD>.docx" in data/, mapped filename -> ISO date,
+// ordered by date.
+function discoverFileDates() {
+  const dated = fs
+    .readdirSync(DATA_DIR)
+    .filter((f) => f.toLowerCase().endsWith('.docx'))
+    .map((f) => ({ file: f, date: resolveDate(f) }))
+    .filter((x) => x.date)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return Object.fromEntries(dated.map(({ file, date }) => [file, date]));
+}
 
 // ---- text helpers ---------------------------------------------------------
 function visibleText(xmlChunk) {
@@ -98,6 +143,14 @@ function extractMonth(label) {
 // Parse the daily .docx files into `allocations`. Pass { dry: true } to
 // preview without writing. Returns the number of allocations inserted.
 export async function importDocx({ dry: DRY = false } = {}) {
+  const FILE_DATES = discoverFileDates();
+  const found = Object.entries(FILE_DATES);
+  if (!found.length) {
+    throw new Error(`No "<WEEKDAY> <DD>.docx" timetable files found in ${DATA_DIR}`);
+  }
+  console.log(`Discovered ${found.length} timetable file(s) in data/:`);
+  for (const [file, date] of found) console.log(`  ${date}  ${file}`);
+
   const conn = await pool.getConnection();
 
   // Lookups
