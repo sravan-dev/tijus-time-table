@@ -98,6 +98,48 @@ router.post('/notify', requireEditor, async (req, res) => {
   res.json({ sent, total: byFac.size, skipped_no_email: 0, failures });
 });
 
+// POST /api/allocations/generate { date, program_id? }
+// Creates the timetable for an empty day by copying the most recent earlier
+// day that has sessions — preferring the same weekday (last Monday for a
+// Monday, etc.) so the weekly pattern carries over. Refuses if the target
+// day already has sessions (for the program, when one is given).
+router.post('/generate', requireEditor, async (req, res) => {
+  const { date, program_id } = req.body || {};
+  if (!date) return res.status(400).json({ error: 'date is required' });
+  const progFilter = program_id ? ' AND program_id = ?' : '';
+  const progParams = program_id ? [program_id] : [];
+
+  const [[existing]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM allocations WHERE alloc_date = ?${progFilter}`,
+    [date, ...progParams]
+  );
+  if (existing.n)
+    return res.status(409).json({ error: 'That day already has sessions' });
+
+  const [cands] = await pool.query(
+    `SELECT DISTINCT alloc_date FROM allocations WHERE alloc_date < ?${progFilter}
+      ORDER BY alloc_date DESC`,
+    [date, ...progParams]
+  );
+  if (!cands.length)
+    return res.status(400).json({ error: 'No earlier day to copy from' });
+  const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+  const sameWeekday = cands.find(
+    (r) => new Date(r.alloc_date + 'T00:00:00Z').getUTCDay() === weekday
+  );
+  const source = (sameWeekday || cands[0]).alloc_date;
+
+  const [r] = await pool.query(
+    `INSERT INTO allocations (alloc_date, program_id, batch_id, activity_id, time_slot_id,
+                              classroom_id, faculty_id, student_count, raw_text, note)
+     SELECT ?, program_id, batch_id, activity_id, time_slot_id,
+            classroom_id, faculty_id, student_count, raw_text, note
+       FROM allocations WHERE alloc_date = ?${progFilter}`,
+    [date, source, ...progParams]
+  );
+  res.json({ created: r.affectedRows, source_date: source });
+});
+
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
   'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'note'];
 
@@ -118,6 +160,18 @@ router.put('/:id', requireEditor, async (req, res) => {
     [...sets.map((f) => req.body[f] ?? null), req.params.id]
   );
   res.json({ ok: true });
+});
+
+// DELETE /api/allocations?date=YYYY-MM-DD[&program_id=] — clear a whole
+// day's table (for one program when program_id is given).
+router.delete('/', requireEditor, async (req, res) => {
+  const { date, program_id } = req.query;
+  if (!date) return res.status(400).json({ error: 'date is required' });
+  const params = [date];
+  let sql = 'DELETE FROM allocations WHERE alloc_date = ?';
+  if (program_id) { sql += ' AND program_id = ?'; params.push(program_id); }
+  const [r] = await pool.query(sql, params);
+  res.json({ deleted: r.affectedRows });
 });
 
 router.delete('/:id', requireEditor, async (req, res) => {

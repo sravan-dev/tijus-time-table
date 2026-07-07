@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
+import { useToast } from '../components/Toast';
 import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
 import ReassignModal from '../components/ReassignModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
+  const toast = useToast();
   // Keep the active program tab in the URL (?program=) so a refresh preserves it.
   const [searchParams, setSearchParams] = useSearchParams();
   const [programs, setPrograms] = useState([]);
@@ -22,6 +24,8 @@ export default function Timetable() {
   const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation }
   const [reassigning, setReassigning] = useState(null); // allocation being reassigned
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
+  const [generating, setGenerating] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   // initial reference load
   useEffect(() => {
@@ -110,6 +114,47 @@ export default function Timetable() {
 
   const confCount = Object.keys(data.conflicts).length;
 
+  // Fill an empty day for the current program by copying the most recent
+  // matching day (same weekday when available) via /allocations/generate.
+  async function generateDay() {
+    const prog = programs.find((p) => p.id === programId);
+    if (!confirm(`Generate the ${prog?.code || ''} timetable for ${fmt(date)} ` +
+      'by copying the most recent matching day? You can edit the sessions afterwards.')) return;
+    setGenerating(true);
+    try {
+      const { data: g } = await api.post('/allocations/generate', {
+        date, program_id: programId,
+      });
+      const { data: ds } = await api.get('/allocations/dates');
+      setDates(ds.map((d) => d.slice(0, 10)));
+      await reload();
+      toast(`Created ${g.created} sessions (copied from ${fmt(g.source_date)})`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not generate the timetable', 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // Delete every session of the current program on the selected day.
+  async function clearDay() {
+    const prog = programs.find((p) => p.id === programId);
+    if (!confirm(`Delete all ${data.allocations.length} ${prog?.code || ''} session(s) on ` +
+      `${fmt(date)}? This cannot be undone.`)) return;
+    setClearing(true);
+    try {
+      const { data: r } = await api.delete(`/allocations?date=${date}&program_id=${programId}`);
+      const { data: ds } = await api.get('/allocations/dates');
+      setDates(ds.map((d) => d.slice(0, 10)));
+      await reload();
+      toast(`Deleted ${r.deleted} session(s)`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not clear the table', 'error');
+    } finally {
+      setClearing(false);
+    }
+  }
+
   function selectProgram(p) {
     setProgramId(p.id);
     setSearchParams({ program: p.code }, { replace: true });
@@ -142,6 +187,12 @@ export default function Timetable() {
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <button className="btn ghost" onClick={() => window.print()}>Print</button>
         {canEdit && <EmailSchedules date={date} />}
+        {canEdit && data.allocations.length > 0 && (
+          <button className="btn danger" onClick={clearDay} disabled={clearing}
+            title="Delete all sessions of this program on this day">
+            {clearing ? 'Clearing…' : '🗑 Clear table'}
+          </button>
+        )}
         {canEdit && (
           <button className="btn" onClick={() => setEditing({ programId, date })}>+ Add session</button>
         )}
@@ -214,7 +265,17 @@ export default function Timetable() {
             ))}
             {!visibleBatches.length && !loading && (
               <tr><td className="batch">—</td><td colSpan={slots.length}>
-                {facultyId ? 'No sessions for this faculty on this day.' : 'No sessions for this day.'}
+                {facultyId ? 'No sessions for this faculty on this day.' : (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+                    No sessions for this day.
+                    {canEdit && (
+                      <button className="btn" onClick={generateDay} disabled={generating}
+                        title="Copy the timetable from the most recent matching day">
+                        {generating ? 'Generating…' : '⚡ Generate'}
+                      </button>
+                    )}
+                  </span>
+                )}
               </td></tr>
             )}
           </tbody>
