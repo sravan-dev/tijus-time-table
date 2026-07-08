@@ -26,6 +26,9 @@ export default function Timetable() {
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const dragRef = useRef(null);           // allocation being dragged
+  const [dragOver, setDragOver] = useState(null); // cellKey of the current drop target
+  const [moving, setMoving] = useState(false);
 
   // initial reference load
   useEffect(() => {
@@ -155,6 +158,45 @@ export default function Timetable() {
     }
   }
 
+  // Delete a single session (the right-clicked cell).
+  async function clearSession(a) {
+    if (!confirm('Clear this session?')) return;
+    try {
+      await api.delete(`/allocations/${a.id}`);
+      await reload();
+      toast('Session cleared');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not clear the session', 'error');
+    }
+  }
+
+  // Drag a session onto another cell: move it into an empty cell, or swap the
+  // two when the target already holds a session. `target` is the allocation
+  // currently in the drop cell (undefined when the cell is empty).
+  async function moveSession(src, targetBatchId, targetSlotId, target) {
+    if (!src) return;
+    if (target && target.id === src.id) return;                       // dropped on itself
+    if (src.batch_id === targetBatchId && src.time_slot_id === targetSlotId) return; // same cell
+    setMoving(true);
+    try {
+      await api.put(`/allocations/${src.id}`, {
+        batch_id: targetBatchId, time_slot_id: targetSlotId,
+      });
+      if (target) {
+        await api.put(`/allocations/${target.id}`, {
+          batch_id: src.batch_id, time_slot_id: src.time_slot_id,
+        });
+      }
+      await reload();
+      toast(target ? 'Sessions swapped' : 'Session moved');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not move the session', 'error');
+      await reload();
+    } finally {
+      setMoving(false);
+    }
+  }
+
   function selectProgram(p) {
     setProgramId(p.id);
     setSearchParams({ program: p.code }, { replace: true });
@@ -231,12 +273,36 @@ export default function Timetable() {
                   const conf = a ? data.conflicts[a.id] : null;
                   const level = conf?.some((c) => c.level === 'error') ? 'error'
                     : conf?.length ? 'warn' : null;
+                  const cellKey = (b.id ?? b.name) + ':' + s.id;
                   return (
                     <td key={s.id}>
                       <div
-                        className={'cell' + (level ? ' conf-' + level : '')}
+                        className={'cell' + (level ? ' conf-' + level : '')
+                          + (dragOver === cellKey ? ' drag-over' : '')}
                         title={conf ? conf.map((c) => c.message).join('\n') : ''}
-                        onClick={() => canEdit && setEditing(
+                        draggable={Boolean(canEdit && a)}
+                        onDragStart={(e) => {
+                          if (!canEdit || !a) return;
+                          dragRef.current = a;
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => { dragRef.current = null; setDragOver(null); }}
+                        onDragOver={(e) => {
+                          if (!canEdit || !dragRef.current) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOver !== cellKey) setDragOver(cellKey);
+                        }}
+                        onDragLeave={() => setDragOver((k) => (k === cellKey ? null : k))}
+                        onDrop={(e) => {
+                          if (!canEdit) return;
+                          e.preventDefault();
+                          const src = dragRef.current;
+                          dragRef.current = null;
+                          setDragOver(null);
+                          if (src) moveSession(src, b.id, s.id, a);
+                        }}
+                        onClick={() => canEdit && !moving && setEditing(
                           a || { programId, date, batch_id: b.id, time_slot_id: s.id }
                         )}
                         onContextMenu={(e) => {
@@ -308,6 +374,18 @@ export default function Timetable() {
             <button className="ctx-item"
               onClick={() => { setReassigning(menu.allocation); setMenu(null); }}>
               Reassign faculty…
+            </button>
+            <button className="ctx-item"
+              onClick={() => {
+                const a = menu.allocation;
+                setEditing({ programId, date, batch_id: a.batch_id, time_slot_id: a.time_slot_id });
+                setMenu(null);
+              }}>
+              Add additional session…
+            </button>
+            <button className="ctx-item danger"
+              onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
+              Clear session
             </button>
           </div>
         </div>
