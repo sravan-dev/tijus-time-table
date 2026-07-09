@@ -9,7 +9,9 @@ export default function Users() {
   const [faculty, setFaculty] = useState([]);
   const [editing, setEditing] = useState(null);   // app-user modal
   const [credFor, setCredFor] = useState(null);    // faculty-login modal
+  const [resendFor, setResendFor] = useState(null); // resend-credentials modal
   const [err, setErr] = useState('');
+  const [note, setNote] = useState('');
 
   const load = () => {
     api.get('/users').then((r) => setRows(r.data)).catch(() => {});
@@ -37,6 +39,11 @@ export default function Users() {
         <button className="btn" onClick={() => setEditing({})}>+ Add user</button>
       </div>
       {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
+      {note && (
+        <div className="card" style={{ marginBottom: 10, borderColor: 'var(--accent-green)' }}>
+          {note} <button className="btn sm ghost" onClick={() => setNote('')}>Dismiss</button>
+        </div>
+      )}
 
       {/* ---- App users (admin / viewer) ---- */}
       <div className="card" style={{ marginBottom: 16 }}>
@@ -66,27 +73,36 @@ export default function Users() {
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Faculty logins</div>
         <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
           Give a tutor a login so they can see their schedule and apply for leave.
+          “Resend details” sets a new password and emails it to them.
         </div>
         <table className="data">
-          <thead><tr><th>Faculty</th><th>Username</th><th>Login</th><th /></tr></thead>
+          <thead><tr><th>Faculty</th><th>Username</th><th>Email</th><th>Login</th><th /></tr></thead>
           <tbody>
             {faculty.map((f) => (
               <tr key={f.faculty_id}>
                 <td><b>{f.faculty_name}</b></td>
                 <td>{f.username || <span className="room">—</span>}</td>
+                <td>{f.email || <span className="room">—</span>}</td>
                 <td>
                   {f.user_id
                     ? <RoleBadge role={f.role} />
                     : <span className="badge" style={{ background: 'var(--muted)' }}>no login</span>}
                 </td>
-                <td style={{ textAlign: 'right' }}>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <button className="btn sm ghost" onClick={() => setCredFor(f)}>
                     {f.user_id ? 'Reset password' : 'Create login'}
-                  </button>
+                  </button>{' '}
+                  {/* only meaningful once they have a login to send */}
+                  {f.user_id && (
+                    <button className="btn sm ghost" onClick={() => setResendFor(f)}
+                      title="Set a new password and email it to this tutor">
+                      ✉ Resend details
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
-            {!faculty.length && <tr><td colSpan={4}>No faculty.</td></tr>}
+            {!faculty.length && <tr><td colSpan={5}>No faculty.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -98,6 +114,10 @@ export default function Users() {
       {credFor && (
         <FacultyCredModal faculty={credFor} onClose={() => setCredFor(null)}
           onSaved={() => { setCredFor(null); load(); }} />
+      )}
+      {resendFor && (
+        <ResendCredModal faculty={resendFor} onClose={() => setResendFor(null)}
+          onSent={(to) => { setResendFor(null); setNote(`Login details emailed to ${to}`); load(); }} />
       )}
     </div>
   );
@@ -116,7 +136,7 @@ function UserModal({ initial, onClose, onSaved }) {
   const isEdit = Boolean(initial?.id);
   const [form, setForm] = useState({
     username: initial.username || '', full_name: initial.full_name || '',
-    role: initial.role || 'viewer', password: '',
+    role: initial.role || 'viewer', password: '', email: '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -159,12 +179,18 @@ function UserModal({ initial, onClose, onSaved }) {
             <option value="viewer">viewer — read only</option>
           </select></div>
         {/* The tutor's faculty record is created from the full name — no need to
-            add them under Manage → Faculty first. */}
+            add them under Manage → Faculty first. The address lives on that
+            record, and is where session and schedule notices are sent. */}
         {!isEdit && isTutor && (
-          <div className="sub" style={{ color: 'var(--muted)', fontSize: 12, marginTop: -4 }}>
-            A faculty record for <b>{form.full_name.trim() || 'this tutor'}</b> is created
-            automatically, so they can be allocated sessions right away.
-          </div>
+          <>
+            <div className="field"><label>Email</label>
+              <input type="email" value={form.email} onChange={set('email')}
+                placeholder="tutor@example.com" /></div>
+            <div className="sub" style={{ color: 'var(--muted)', fontSize: 12, marginTop: -4 }}>
+              A faculty record for <b>{form.full_name.trim() || 'this tutor'}</b> is created
+              automatically. They’re emailed here whenever a session is assigned to them.
+            </div>
+          </>
         )}
         <div className="field"><label>{isEdit ? 'New password (leave blank to keep)' : 'Password'}</label>
           <input type="password" value={form.password} onChange={set('password')}
@@ -173,6 +199,57 @@ function UserModal({ initial, onClose, onSaved }) {
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Resend login details (resets the password and emails it) ----
+// The stored password is a bcrypt hash, so it cannot be read back and re-sent:
+// the only way to tell a tutor their password is to set a new one.
+function ResendCredModal({ faculty, onClose, onSent }) {
+  const [email, setEmail] = useState(faculty.email || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const hadEmail = Boolean(faculty.email);
+
+  async function send() {
+    setErr('');
+    if (!email.trim()) return setErr('An email address is required');
+    setBusy(true);
+    try {
+      // the address is saved to the faculty record server-side when it's new
+      const { data } = await api.post(`/users/faculty/${faculty.faculty_id}/resend-credentials`,
+        { email: email.trim() });
+      onSent(data.sent_to);
+    } catch (e) { setErr(e.response?.data?.error || 'Could not send the email'); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Resend login details · {faculty.faculty_name}</h3>
+        <div className="field"><label>Email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="tutor@example.com" autoFocus />
+          {!hadEmail && (
+            <div className="sub" style={{ color: 'var(--muted)', fontSize: 12 }}>
+              No address on file — this one is saved to their faculty record.
+            </div>
+          )}
+        </div>
+        <div className="card" style={{ borderColor: 'var(--warn)', fontSize: 13 }}>
+          Passwords are stored hashed and can’t be looked up, so sending the details
+          <b> sets a new password</b> for <b>{faculty.username}</b> and emails it.
+          Their current password will stop working.
+        </div>
+        {err && <div className="err">{err}</div>}
+        <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn" onClick={send} disabled={busy}>
+            {busy ? 'Sending…' : 'Reset & send'}
+          </button>
         </div>
       </div>
     </div>

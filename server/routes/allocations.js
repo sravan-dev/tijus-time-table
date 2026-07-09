@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { conflictsForDate } from '../services/conflicts.js';
-import { sendMail, scheduleEmail } from '../services/mailer.js';
+import { sendMail, scheduleEmail, sessionAssignedEmail } from '../services/mailer.js';
 import { getSettings } from '../services/settings.js';
 
 const router = Router();
@@ -145,6 +145,37 @@ router.post('/generate', requireEditor, async (req, res) => {
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
   'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'note'];
 
+// Email the tutor that a session is now theirs. Fire-and-forget: a mail problem
+// (SMTP down, no address on file, email switched off) must never fail — or
+// roll back — the allocation itself, so everything here is swallowed and logged.
+// Pending requests are skipped: a session isn't really assigned until approved.
+async function notifyAssigned(allocationId) {
+  try {
+    const settings = await getSettings();
+    if (settings.smtp_enabled !== '1') return;          // email disabled in Settings
+    const [[s]] = await pool.query(
+      `SELECT a.alloc_date, a.note, f.name AS faculty_name, f.email,
+              p.code AS program_code, b.name AS batch_name,
+              ac.code AS activity_code, ac.name AS activity_name,
+              ts.label AS slot_label, r.code AS room_code
+         FROM allocations a
+         JOIN faculty f      ON f.id = a.faculty_id
+         JOIN programs p     ON p.id = a.program_id
+         LEFT JOIN batches b ON b.id = a.batch_id
+         LEFT JOIN activities ac ON ac.id = a.activity_id
+         JOIN time_slots ts  ON ts.id = a.time_slot_id
+         LEFT JOIN classrooms r ON r.id = a.classroom_id
+        WHERE a.id = ? AND a.status = 'approved'`,
+      [allocationId]
+    );
+    if (!s?.email) return;                              // no address on file
+    const { subject, html, text } = sessionAssignedEmail(s.faculty_name, s, settings.app_title);
+    await sendMail({ to: s.email, subject, html, text });
+  } catch (e) {
+    console.error(`[mail] assignment notice for allocation ${allocationId} failed:`, e.message);
+  }
+}
+
 router.post('/', requireEditor, async (req, res) => {
   const vals = fields.map((f) => req.body[f] ?? null);
   const [r] = await pool.query(
@@ -152,16 +183,30 @@ router.post('/', requireEditor, async (req, res) => {
     vals
   );
   res.json({ id: r.insertId });
+  if (req.body.faculty_id) notifyAssigned(r.insertId);  // after responding
 });
 
 router.put('/:id', requireEditor, async (req, res) => {
   const sets = fields.filter((f) => f in req.body);
   if (!sets.length) return res.json({ ok: true });
+
+  // Only a *change* of tutor is an assignment. Dragging a session around the
+  // grid never sends faculty_id, so a move can't spam the same tutor.
+  let previousFaculty;
+  if ('faculty_id' in req.body) {
+    const [[before]] = await pool.query('SELECT faculty_id FROM allocations WHERE id = ?', [req.params.id]);
+    previousFaculty = before?.faculty_id ?? null;
+  }
+
   await pool.query(
     `UPDATE allocations SET ${sets.map((f) => `${f}=?`).join(',')} WHERE id=?`,
     [...sets.map((f) => req.body[f] ?? null), req.params.id]
   );
   res.json({ ok: true });
+
+  const nowFaculty = req.body.faculty_id ?? null;
+  if (nowFaculty && Number(nowFaculty) !== Number(previousFaculty))
+    notifyAssigned(req.params.id);
 });
 
 // DELETE /api/allocations?date=YYYY-MM-DD[&program_id=] — clear a whole

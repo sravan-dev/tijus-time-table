@@ -50,6 +50,68 @@ const fmtDate = (iso) => {
   return `${+d} ${MON[+m - 1]} ${y}`;
 };
 
+// Compose the login details sent to a tutor. The password is included in the
+// clear because it was just generated and has never been stored in readable
+// form — this mail is the only copy, so it tells them to change it.
+export function credentialsEmail(facultyName, { username, password, url }, appTitle) {
+  const app = appTitle || 'Tijus Academy';
+  const cell = 'padding:6px 10px;border:1px solid #e6e6f0';
+  const row = (k, v) => `<tr>
+      <td style="${cell};background:#ececf7;text-align:left"><b>${k}</b></td>
+      <td style="${cell};font-family:Consolas,monospace">${v}</td>
+    </tr>`;
+  const html = `
+    <div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2233">
+      <h2 style="color:#303070;margin:0 0 4px">${app}</h2>
+      <p>Hi ${facultyName}, here are your login details:</p>
+      <table style="border-collapse:collapse;font-size:14px">
+        ${row('Username', username)}
+        ${row('Password', password)}
+      </table>
+      ${url ? `<p style="margin-top:14px">Sign in at <a href="${url}">${url}</a></p>` : ''}
+      <p style="color:#b42318;font-size:13px;margin-top:14px">
+        This password was just reset, so any previous one no longer works.
+        Please change it after signing in.
+      </p>
+      <p style="color:#6b7090;font-size:12px;margin-top:16px">Sent by ${app}. If you didn’t expect this, contact the office.</p>
+    </div>`;
+  const text = `Hi ${facultyName}, here are your login details.\n`
+    + `Username: ${username}\nPassword: ${password}\n`
+    + (url ? `Sign in at ${url}\n` : '')
+    + 'This password was just reset; any previous one no longer works.';
+  return { subject: `Your ${app} login details`, html, text };
+}
+
+// Compose the note a tutor gets when a single session is assigned to them.
+export function sessionAssignedEmail(facultyName, s, appTitle) {
+  const app = appTitle || 'Tijus Academy';
+  const cell = 'padding:6px 10px;border:1px solid #e6e6f0';
+  const row = (k, v) => `<tr>
+      <td style="${cell};background:#ececf7;text-align:left"><b>${k}</b></td>
+      <td style="${cell}">${v || '—'}</td>
+    </tr>`;
+  const html = `
+    <div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2233">
+      <h2 style="color:#303070;margin:0 0 4px">${app}</h2>
+      <p>Hi ${facultyName}, a session has been assigned to you:</p>
+      <table style="border-collapse:collapse;font-size:14px">
+        ${row('Date', fmtDate(s.alloc_date))}
+        ${row('Time', s.slot_label)}
+        ${row('Program', s.program_code)}
+        ${row('Batch', s.batch_name)}
+        ${row('Activity', s.activity_name || s.activity_code)}
+        ${row('Room', s.room_code)}
+        ${s.note ? row('Note', s.note) : ''}
+      </table>
+      <p style="color:#6b7090;font-size:12px;margin-top:16px">Sent automatically by ${app} when the session was allocated.</p>
+    </div>`;
+  const text = `Hi ${facultyName}, a session has been assigned to you.\n`
+    + `${fmtDate(s.alloc_date)} · ${s.slot_label} · ${s.program_code}`
+    + `${s.batch_name ? ' · ' + s.batch_name : ''}`
+    + `${s.room_code ? ' · Room ' + s.room_code : ''}`;
+  return { subject: `New session assigned · ${fmtDate(s.alloc_date)}`, html, text };
+}
+
 // Compose a faculty schedule email for a given date from their sessions.
 export function scheduleEmail(facultyName, date, sessions, appTitle) {
   const rows = sessions

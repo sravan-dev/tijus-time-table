@@ -2,13 +2,25 @@
 // never returned to the client.
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { sendMail, credentialsEmail } from '../services/mailer.js';
+import { getSettings } from '../services/settings.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
 
 const ROLES = ['admin', 'manager', 'viewer', 'faculty'];
+
+// A readable temporary password: no 0/O/1/l/I to survive being retyped by hand.
+const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+function generatePassword(len = 12) {
+  const bytes = crypto.randomBytes(len);
+  let out = '';
+  for (let i = 0; i < len; i++) out += ALPHABET[bytes[i] % ALPHABET.length];
+  return out;
+}
 
 router.get('/', async (_req, res) => {
   const [rows] = await pool.query(
@@ -24,7 +36,7 @@ router.get('/', async (_req, res) => {
 // "Faculty logins" section on the Users page.
 router.get('/faculty-accounts', async (_req, res) => {
   const [rows] = await pool.query(
-    `SELECT f.id AS faculty_id, f.name AS faculty_name,
+    `SELECT f.id AS faculty_id, f.name AS faculty_name, f.email,
             u.id AS user_id, u.username, u.role
        FROM faculty f
        LEFT JOIN users u ON u.faculty_id = f.id AND u.role IN ('faculty','manager')
@@ -81,7 +93,9 @@ router.post('/faculty/:facultyId/credentials', async (req, res) => {
 // Given an explicit faculty_id we use it; otherwise we match on name, reusing an
 // existing record when it has no login yet and creating one when there is none.
 // Runs on `conn` so it rolls back with the user insert.
-async function resolveTutorFaculty(conn, { faculty_id, full_name }) {
+// The email lives on the faculty record (users has no email column) — it is what
+// schedule and session-assignment notices are sent to.
+async function resolveTutorFaculty(conn, { faculty_id, full_name, email }) {
   if (faculty_id) {
     const [[fac]] = await conn.query('SELECT id FROM faculty WHERE id = ?', [faculty_id]);
     if (!fac) return { error: 404, message: 'Faculty not found' };
@@ -89,6 +103,7 @@ async function resolveTutorFaculty(conn, { faculty_id, full_name }) {
   // The record is named after the tutor, so a real name is required — falling
   // back to the username would create faculty called things like "jsmith92".
   const name = (full_name || '').trim();
+  const addr = (email || '').trim() || null;
   if (!faculty_id && !name)
     return { error: 400, message: 'A full name is required to create a tutor' };
 
@@ -100,7 +115,8 @@ async function resolveTutorFaculty(conn, { faculty_id, full_name }) {
     if (existing) {
       id = existing.id;
     } else {
-      const [ins] = await conn.query('INSERT INTO faculty (name, active) VALUES (?, 1)', [name]);
+      const [ins] = await conn.query(
+        'INSERT INTO faculty (name, email, active) VALUES (?, ?, 1)', [name, addr]);
       return { id: ins.insertId, created: true };
     }
   }
@@ -109,11 +125,63 @@ async function resolveTutorFaculty(conn, { faculty_id, full_name }) {
   const [[taken]] = await conn.query(
     "SELECT id FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [id]);
   if (taken) return { error: 409, message: 'That faculty member already has a login' };
+
+  // Reusing an existing record: fill in the address the admin just typed. Only
+  // when one was given, so leaving the field blank never wipes a stored address.
+  if (addr) await conn.query('UPDATE faculty SET email = ? WHERE id = ?', [addr, id]);
   return { id, created: false };
 }
 
+// Email a tutor their login details, resetting the password to a fresh one.
+// The stored password is a bcrypt hash and cannot be read back, so "resend"
+// necessarily means "reset and send" — the mail is the only copy that exists.
+//
+// An `email` in the body is saved to the faculty record first, so an admin can
+// fill in a missing address at the moment of sending.
+router.post('/faculty/:facultyId/resend-credentials', async (req, res) => {
+  const facultyId = Number(req.params.facultyId);
+  const typed = (req.body?.email || '').trim();
+
+  const [[fac]] = await pool.query('SELECT id, name, email FROM faculty WHERE id = ?', [facultyId]);
+  if (!fac) return res.status(404).json({ error: 'Faculty not found' });
+
+  const [[user]] = await pool.query(
+    "SELECT id, username FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [facultyId]);
+  if (!user)
+    return res.status(400).json({ error: 'That faculty member has no login yet — create one first' });
+
+  const settings = await getSettings();
+  if (settings.smtp_enabled !== '1')
+    return res.status(400).json({ error: 'Email is disabled — enable it in Settings first' });
+
+  const to = typed || fac.email;
+  if (!to) return res.status(400).json({ error: 'No email address on file for this tutor' });
+  if (typed && typed !== fac.email)
+    await pool.query('UPDATE faculty SET email = ? WHERE id = ?', [typed, facultyId]);
+
+  const password = generatePassword();
+  const { subject, html, text } = credentialsEmail(
+    fac.name, { username: user.username, password, url: req.headers.origin || null },
+    settings.app_title
+  );
+
+  // Send BEFORE storing the new hash. If the mail fails, the tutor keeps their
+  // existing password rather than being locked out of an account whose new
+  // password nobody ever received.
+  try {
+    await sendMail({ to, subject, html, text });
+  } catch (e) {
+    return res.status(502).json({ error: `Could not send the email: ${e.message}` });
+  }
+  await pool.query('UPDATE users SET password_hash = ? WHERE id = ?',
+    [await bcrypt.hash(password, 10), user.id]);
+
+  res.json({ ok: true, sent_to: to });
+});
+
 router.post('/', async (req, res) => {
-  const { username, password, full_name = null, role = 'viewer', faculty_id = null } = req.body || {};
+  const { username, password, full_name = null, role = 'viewer',
+    faculty_id = null, email = null } = req.body || {};
   if (!username || !password)
     return res.status(400).json({ error: 'username and password are required' });
   if (!ROLES.includes(role))
@@ -125,7 +193,7 @@ router.post('/', async (req, res) => {
 
     let facultyId = null;
     if (role === 'faculty') {
-      const r = await resolveTutorFaculty(conn, { faculty_id, full_name });
+      const r = await resolveTutorFaculty(conn, { faculty_id, full_name, email });
       if (r.error) {
         await conn.rollback();
         return res.status(r.error).json({ error: r.message });
