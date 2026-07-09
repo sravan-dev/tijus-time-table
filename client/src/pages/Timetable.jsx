@@ -29,6 +29,10 @@ export default function Timetable() {
   const dragRef = useRef(null);           // allocation being dragged
   const [dragOver, setDragOver] = useState(null); // cellKey of the current drop target
   const [moving, setMoving] = useState(false);
+  // Undo/redo history for drag moves. Each entry is a list of position changes:
+  // { id, from:{batch_id,time_slot_id}, to:{batch_id,time_slot_id} }.
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
 
   // initial reference load
   useEffect(() => {
@@ -101,6 +105,27 @@ export default function Timetable() {
     if (facultyId && !facultyOptions.some((f) => f.id === Number(facultyId))) setFacultyId('');
   }, [facultyOptions, facultyId]);
 
+  // Drag history is only meaningful for the grid currently on screen, so drop
+  // it whenever the program or date changes.
+  useEffect(() => { setUndoStack([]); setRedoStack([]); }, [date, programId]);
+
+  // Keyboard shortcuts: Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to
+  // redo the last drag move. Ignored while typing in a field or dialog.
+  useEffect(() => {
+    if (!canEdit) return;
+    function onKey(e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
+        || t.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoMove(); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoMove(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   // when a faculty is selected, keep only their allocated cells (and the rows
   // that still have any), so the grid shows that faculty's slots at a glance
   const visibleBatches = useMemo(() => {
@@ -170,27 +195,81 @@ export default function Timetable() {
     }
   }
 
+  // Apply a list of position changes ({ id, batch_id, time_slot_id }) in order.
+  async function applyPositions(changes) {
+    for (const c of changes) {
+      await api.put(`/allocations/${c.id}`, {
+        batch_id: c.batch_id, time_slot_id: c.time_slot_id,
+      });
+    }
+  }
+
   // Drag a session onto another cell: move it into an empty cell, or swap the
   // two when the target already holds a session. `target` is the allocation
   // currently in the drop cell (undefined when the cell is empty).
   async function moveSession(src, targetBatchId, targetSlotId, target) {
-    if (!src) return;
+    if (!src || moving) return;
     if (target && target.id === src.id) return;                       // dropped on itself
     if (src.batch_id === targetBatchId && src.time_slot_id === targetSlotId) return; // same cell
+    const ops = [{
+      id: src.id,
+      from: { batch_id: src.batch_id, time_slot_id: src.time_slot_id },
+      to: { batch_id: targetBatchId, time_slot_id: targetSlotId },
+    }];
+    if (target) {
+      ops.push({
+        id: target.id,
+        from: { batch_id: target.batch_id, time_slot_id: target.time_slot_id },
+        to: { batch_id: src.batch_id, time_slot_id: src.time_slot_id },
+      });
+    }
     setMoving(true);
     try {
-      await api.put(`/allocations/${src.id}`, {
-        batch_id: targetBatchId, time_slot_id: targetSlotId,
-      });
-      if (target) {
-        await api.put(`/allocations/${target.id}`, {
-          batch_id: src.batch_id, time_slot_id: src.time_slot_id,
-        });
-      }
+      await applyPositions(ops.map((o) => ({ id: o.id, ...o.to })));
       await reload();
+      setUndoStack((s) => [...s, ops]);
+      setRedoStack([]);                          // a fresh move invalidates redo
       toast(target ? 'Sessions swapped' : 'Session moved');
     } catch (e) {
       toast(e.response?.data?.error || 'Could not move the session', 'error');
+      await reload();
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  // Undo the most recent drag move (restore the "from" positions).
+  async function undoMove() {
+    if (moving || !undoStack.length) return;
+    const ops = undoStack[undoStack.length - 1];
+    setMoving(true);
+    try {
+      await applyPositions(ops.map((o) => ({ id: o.id, ...o.from })));
+      await reload();
+      setUndoStack((s) => s.slice(0, -1));
+      setRedoStack((s) => [...s, ops]);
+      toast('Move undone');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not undo', 'error');
+      await reload();
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  // Redo the last undone drag move (re-apply the "to" positions).
+  async function redoMove() {
+    if (moving || !redoStack.length) return;
+    const ops = redoStack[redoStack.length - 1];
+    setMoving(true);
+    try {
+      await applyPositions(ops.map((o) => ({ id: o.id, ...o.to })));
+      await reload();
+      setRedoStack((s) => s.slice(0, -1));
+      setUndoStack((s) => [...s, ops]);
+      toast('Move redone');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not redo', 'error');
       await reload();
     } finally {
       setMoving(false);
@@ -229,6 +308,16 @@ export default function Timetable() {
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <button className="btn ghost" onClick={() => window.print()}>Print</button>
         {canEdit && <EmailSchedules date={date} />}
+        {canEdit && (undoStack.length > 0 || redoStack.length > 0) && (
+          <>
+            <button className="btn ghost" onClick={undoMove}
+              disabled={moving || !undoStack.length}
+              title="Undo the last drag move (Ctrl+Z)">↶ Undo</button>
+            <button className="btn ghost" onClick={redoMove}
+              disabled={moving || !redoStack.length}
+              title="Redo the last undone move (Ctrl+Y)">↷ Redo</button>
+          </>
+        )}
         {canEdit && data.allocations.length > 0 && (
           <button className="btn danger" onClick={clearDay} disabled={clearing}
             title="Delete all sessions of this program on this day">
