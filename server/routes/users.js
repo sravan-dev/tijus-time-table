@@ -73,6 +73,45 @@ router.post('/faculty/:facultyId/credentials', async (req, res) => {
   }
 });
 
+// Resolves the faculty record a new tutor login attaches to, creating one when
+// needed. A tutor is always scoped to exactly one faculty record (otherwise
+// /api/my/* could not tell whose schedule to serve), but the admin shouldn't
+// have to create that record separately — adding the user is enough.
+//
+// Given an explicit faculty_id we use it; otherwise we match on name, reusing an
+// existing record when it has no login yet and creating one when there is none.
+// Runs on `conn` so it rolls back with the user insert.
+async function resolveTutorFaculty(conn, { faculty_id, full_name }) {
+  if (faculty_id) {
+    const [[fac]] = await conn.query('SELECT id FROM faculty WHERE id = ?', [faculty_id]);
+    if (!fac) return { error: 404, message: 'Faculty not found' };
+  }
+  // The record is named after the tutor, so a real name is required — falling
+  // back to the username would create faculty called things like "jsmith92".
+  const name = (full_name || '').trim();
+  if (!faculty_id && !name)
+    return { error: 400, message: 'A full name is required to create a tutor' };
+
+  let id = faculty_id;
+  if (!id) {
+    // faculty.name is UNIQUE, so an existing record with this name is *the*
+    // record for this person — reuse it rather than failing on the constraint.
+    const [[existing]] = await conn.query('SELECT id FROM faculty WHERE name = ?', [name]);
+    if (existing) {
+      id = existing.id;
+    } else {
+      const [ins] = await conn.query('INSERT INTO faculty (name, active) VALUES (?, 1)', [name]);
+      return { id: ins.insertId, created: true };
+    }
+  }
+
+  // Each faculty record gets at most one login.
+  const [[taken]] = await conn.query(
+    "SELECT id FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [id]);
+  if (taken) return { error: 409, message: 'That faculty member already has a login' };
+  return { id, created: false };
+}
+
 router.post('/', async (req, res) => {
   const { username, password, full_name = null, role = 'viewer', faculty_id = null } = req.body || {};
   if (!username || !password)
@@ -80,30 +119,34 @@ router.post('/', async (req, res) => {
   if (!ROLES.includes(role))
     return res.status(400).json({ error: 'invalid role' });
 
-  // A tutor login is scoped to one faculty record, and each record gets at most
-  // one login — otherwise /api/my/* would not know whose schedule to serve.
-  if (role === 'faculty') {
-    if (!faculty_id)
-      return res.status(400).json({ error: 'faculty_id is required for a tutor login' });
-    const [[fac]] = await pool.query('SELECT id FROM faculty WHERE id = ?', [faculty_id]);
-    if (!fac) return res.status(404).json({ error: 'Faculty not found' });
-    const [[taken]] = await pool.query(
-      "SELECT id FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [faculty_id]);
-    if (taken)
-      return res.status(409).json({ error: 'That faculty member already has a login' });
-  }
-
+  const conn = await pool.getConnection();
   try {
+    await conn.beginTransaction();
+
+    let facultyId = null;
+    if (role === 'faculty') {
+      const r = await resolveTutorFaculty(conn, { faculty_id, full_name });
+      if (r.error) {
+        await conn.rollback();
+        return res.status(r.error).json({ error: r.message });
+      }
+      facultyId = r.id;
+    }
+
     const hash = await bcrypt.hash(password, 10);
-    const [r] = await pool.query(
+    const [r] = await conn.query(
       'INSERT INTO users (username, password_hash, full_name, role, faculty_id) VALUES (?, ?, ?, ?, ?)',
-      [username, hash, full_name, role, role === 'faculty' ? faculty_id : null]
+      [username, hash, full_name, role, facultyId]
     );
-    res.json({ id: r.insertId });
+    await conn.commit();
+    res.json({ id: r.insertId, faculty_id: facultyId });
   } catch (e) {
+    await conn.rollback();   // a duplicate username must not leave a stray faculty row
     if (e.code === 'ER_DUP_ENTRY')
       return res.status(409).json({ error: 'Username already exists' });
     throw e;
+  } finally {
+    conn.release();
   }
 });
 

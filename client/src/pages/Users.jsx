@@ -92,10 +92,7 @@ export default function Users() {
       </div>
 
       {editing && (
-        <UserModal initial={editing}
-          /* a tutor login must attach to a faculty record that has none yet */
-          unlinkedFaculty={faculty.filter((f) => !f.user_id)}
-          onClose={() => setEditing(null)}
+        <UserModal initial={editing} onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }} />
       )}
       {credFor && (
@@ -115,11 +112,11 @@ function RoleBadge({ role }) {
 }
 
 // ---- App user create/edit ----
-function UserModal({ initial, unlinkedFaculty = [], onClose, onSaved }) {
+function UserModal({ initial, onClose, onSaved }) {
   const isEdit = Boolean(initial?.id);
   const [form, setForm] = useState({
     username: initial.username || '', full_name: initial.full_name || '',
-    role: initial.role || 'viewer', password: '', faculty_id: '',
+    role: initial.role || 'viewer', password: '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -130,8 +127,9 @@ function UserModal({ initial, unlinkedFaculty = [], onClose, onSaved }) {
     setErr('');
     if (!form.username) return setErr('Username is required');
     if (!isEdit && !form.password) return setErr('Password is required');
-    if (!isEdit && isTutor && !form.faculty_id)
-      return setErr('Pick the faculty record this tutor logs in as');
+    // the server names the tutor's new faculty record after their full name
+    if (!isEdit && isTutor && !form.full_name.trim())
+      return setErr('A full name is required for a tutor');
     setBusy(true);
     try {
       if (isEdit) {
@@ -139,7 +137,7 @@ function UserModal({ initial, unlinkedFaculty = [], onClose, onSaved }) {
         if (form.password) payload.password = form.password;
         await api.put(`/users/${initial.id}`, payload);
       } else {
-        await api.post('/users', { ...form, faculty_id: isTutor ? form.faculty_id : null });
+        await api.post('/users', form);
       }
       onSaved();
     } catch (e) { setErr(e.response?.data?.error || 'Save failed'); setBusy(false); }
@@ -160,20 +158,12 @@ function UserModal({ initial, unlinkedFaculty = [], onClose, onSaved }) {
             <option value="faculty">tutor — own schedule, sessions &amp; leave (needs approval)</option>
             <option value="viewer">viewer — read only</option>
           </select></div>
-        {/* a tutor login is meaningless without a faculty record to scope it to */}
+        {/* The tutor's faculty record is created from the full name — no need to
+            add them under Manage → Faculty first. */}
         {!isEdit && isTutor && (
-          <div className="field"><label>Faculty record</label>
-            <select value={form.faculty_id} onChange={set('faculty_id')}>
-              <option value="">Select the tutor…</option>
-              {unlinkedFaculty.map((f) => (
-                <option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>
-              ))}
-            </select>
-            {!unlinkedFaculty.length && (
-              <div className="sub" style={{ color: 'var(--muted)', fontSize: 12 }}>
-                Every faculty member already has a login. Add one under Manage → Faculty first.
-              </div>
-            )}
+          <div className="sub" style={{ color: 'var(--muted)', fontSize: 12, marginTop: -4 }}>
+            A faculty record for <b>{form.full_name.trim() || 'this tutor'}</b> is created
+            automatically, so they can be allocated sessions right away.
           </div>
         )}
         <div className="field"><label>{isEdit ? 'New password (leave blank to keep)' : 'Password'}</label>
