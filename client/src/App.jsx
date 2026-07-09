@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, NavLink, Link, useNavigate } from 'react-router-dom';
-import { useAuth } from './auth';
+import api from './api/client';
+import { useAuth, roleLabel } from './auth';
 import { useBranding } from './branding';
 import NotificationBell from './components/NotificationBell';
 import SupportButton from './components/SupportButton';
@@ -10,7 +12,9 @@ import Schedule from './pages/Schedule';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
 import MySchedule from './pages/MySchedule';
+import MySessions from './pages/MySessions';
 import MyLeaves from './pages/MyLeaves';
+import Approvals from './pages/Approvals';
 import Tickets from './pages/Tickets';
 
 // Landing route depends on role.
@@ -30,6 +34,7 @@ function Shell({ children }) {
           {isFaculty ? (
             <>
               <NavLink to="/my-schedule">My Schedule</NavLink>
+              <NavLink to="/my-sessions">My Sessions</NavLink>
               <NavLink to="/my-leaves">My Leaves</NavLink>
               <NavLink to="/tickets">Support</NavLink>
             </>
@@ -38,11 +43,13 @@ function Shell({ children }) {
               <NavLink to="/timetable">Timetable</NavLink>
               <NavLink to="/manage">Manage</NavLink>
               <NavLink to="/schedule">Leave &amp; Blocks</NavLink>
+              {isAdmin && <ApprovalsLink />}
               {isAdmin && <NavLink to="/users">Users</NavLink>}
               {isAdmin && <NavLink to="/settings">Settings</NavLink>}
               <NavLink to="/tickets">Tickets</NavLink>
               {/* a manager who is also a tutor gets their personal views too */}
               {hasSelfSchedule && <NavLink to="/my-schedule">My Schedule</NavLink>}
+              {hasSelfSchedule && <NavLink to="/my-sessions">My Sessions</NavLink>}
               {hasSelfSchedule && <NavLink to="/my-leaves">My Leaves</NavLink>}
             </>
           )}
@@ -50,7 +57,7 @@ function Shell({ children }) {
         <span className="spacer" />
         <NotificationBell />
         <span className="who">
-          {user?.name || user?.username} · <b>{user?.role}</b>
+          {user?.name || user?.username} · <b>{roleLabel(user?.role)}</b>
         </span>
         <button className="btn ghost sm" onClick={() => { logout(); nav('/login'); }}>
           Log out
@@ -59,6 +66,26 @@ function Shell({ children }) {
       {children}
       <SupportButton />
     </>
+  );
+}
+
+// Approvals nav item, badged with the number of pending tutor requests. Polled
+// so an admin sitting on another page still notices new requests.
+function ApprovalsLink() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.get('/approvals/counts')
+      .then((r) => { if (alive) setCount(r.data.total); })
+      .catch(() => {});
+    tick();
+    const t = setInterval(tick, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return (
+    <NavLink to="/approvals">
+      Approvals{count > 0 && <span className="nav-badge">{count}</span>}
+    </NavLink>
   );
 }
 
@@ -86,9 +113,11 @@ export default function App() {
       <Route path="/schedule" element={<RoleRoute allow={STAFF}><Schedule /></RoleRoute>} />
       <Route path="/users" element={<RoleRoute allow={['admin']}><Users /></RoleRoute>} />
       <Route path="/settings" element={<RoleRoute allow={['admin']}><Settings /></RoleRoute>} />
+      <Route path="/approvals" element={<RoleRoute allow={['admin']}><Approvals /></RoleRoute>} />
 
-      {/* faculty self-service */}
+      {/* tutor self-service (role 'faculty' in the DB) */}
       <Route path="/my-schedule" element={<RoleRoute allow={['faculty']} selfSchedule><MySchedule /></RoleRoute>} />
+      <Route path="/my-sessions" element={<RoleRoute allow={['faculty']} selfSchedule><MySessions /></RoleRoute>} />
       <Route path="/my-leaves" element={<RoleRoute allow={['faculty']} selfSchedule><MyLeaves /></RoleRoute>} />
 
       {/* support tickets — any signed-in role can raise; admins manage & reply */}

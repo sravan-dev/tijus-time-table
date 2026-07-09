@@ -20,10 +20,11 @@ router.get('/', async (req, res) => {
   const items = [];
 
   if (role === 'faculty' && faculty_id) {
-    // sessions per scheduled day
+    // sessions per scheduled day (approved ones — pending are still requests)
     const [days] = await pool.query(
       `SELECT alloc_date, COUNT(*) AS n FROM allocations
-        WHERE faculty_id = ? GROUP BY alloc_date ORDER BY alloc_date`, [faculty_id]);
+        WHERE faculty_id = ? AND status = 'approved'
+        GROUP BY alloc_date ORDER BY alloc_date`, [faculty_id]);
     for (const d of days)
       items.push({
         id: `fs-${d.alloc_date}`, level: 'info', type: 'schedule',
@@ -31,12 +32,13 @@ router.get('/', async (req, res) => {
         detail: fmt(d.alloc_date), date: d.alloc_date,
       });
 
-    // scheduled on a day you're marked on leave
+    // scheduled on a day your leave was approved
     const [clash] = await pool.query(
       `SELECT a.alloc_date, COUNT(*) AS n
          FROM allocations a
          JOIN faculty_leave fl ON fl.faculty_id = a.faculty_id AND fl.leave_date = a.alloc_date
-        WHERE a.faculty_id = ? GROUP BY a.alloc_date`, [faculty_id]);
+        WHERE a.faculty_id = ? AND a.status = 'approved' AND fl.status = 'approved'
+        GROUP BY a.alloc_date`, [faculty_id]);
     for (const c of clash)
       items.push({
         id: `fc-${c.alloc_date}`, level: 'warn', type: 'leave_clash',
@@ -44,14 +46,29 @@ router.get('/', async (req, res) => {
         detail: `${c.n} session(s) on ${fmt(c.alloc_date)} clash with your leave`, date: c.alloc_date,
       });
 
-    // recent leave records
+    // recent leave, with where each request currently stands
     const [leaves] = await pool.query(
-      `SELECT leave_date, reason FROM faculty_leave WHERE faculty_id = ?
+      `SELECT leave_date, reason, status FROM faculty_leave WHERE faculty_id = ?
         ORDER BY leave_date DESC LIMIT 5`, [faculty_id]);
     for (const l of leaves)
       items.push({
-        id: `lv-${l.leave_date}`, level: 'info', type: 'leave',
-        title: `Leave recorded`, detail: `${fmt(l.leave_date)}${l.reason ? ' · ' + l.reason : ''}`, date: l.leave_date,
+        id: `lv-${l.leave_date}`,
+        level: l.status === 'rejected' ? 'warn' : 'info', type: 'leave',
+        title: l.status === 'pending' ? 'Leave request pending approval'
+          : l.status === 'rejected' ? 'Leave request rejected' : 'Leave approved',
+        detail: `${fmt(l.leave_date)}${l.reason ? ' · ' + l.reason : ''}`, date: l.leave_date,
+      });
+
+    // where each session request stands
+    const [reqs] = await pool.query(
+      `SELECT id, alloc_date, status FROM allocations
+        WHERE requested_by = ? AND status <> 'approved'
+        ORDER BY alloc_date DESC LIMIT 5`, [req.user.id]);
+    for (const s of reqs)
+      items.push({
+        id: `sr-${s.id}`, level: s.status === 'rejected' ? 'warn' : 'info', type: 'session_request',
+        title: s.status === 'pending' ? 'Session request pending approval' : 'Session request rejected',
+        detail: fmt(s.alloc_date), date: s.alloc_date,
       });
   } else {
     // admin / viewer: conflicts per day
@@ -66,16 +83,30 @@ router.get('/', async (req, res) => {
           detail: fmt(d.alloc_date), date: d.alloc_date,
         });
     }
-    // recent faculty leave applications
+    // recent faculty leave applications; pending ones are actionable
     const [leaves] = await pool.query(
-      `SELECT fl.id, fl.leave_date, fl.reason, f.name
+      `SELECT fl.id, fl.leave_date, fl.reason, fl.status, f.name
          FROM faculty_leave fl JOIN faculty f ON f.id = fl.faculty_id
         ORDER BY fl.id DESC LIMIT 10`);
     for (const l of leaves)
       items.push({
-        id: `al-${l.id}`, level: 'info', type: 'leave',
-        title: `${l.name} applied for leave`,
+        id: `al-${l.id}`, level: l.status === 'pending' ? 'warn' : 'info', type: 'leave',
+        title: l.status === 'pending'
+          ? `${l.name} applied for leave — needs approval`
+          : `${l.name} leave ${l.status}`,
         detail: `${fmt(l.leave_date)}${l.reason ? ' · ' + l.reason : ''}`, date: l.leave_date,
+      });
+
+    // tutor-proposed sessions waiting on an admin decision
+    const [pending] = await pool.query(
+      `SELECT a.id, a.alloc_date, f.name
+         FROM allocations a LEFT JOIN faculty f ON f.id = a.faculty_id
+        WHERE a.status = 'pending' ORDER BY a.alloc_date LIMIT 10`);
+    for (const s of pending)
+      items.push({
+        id: `as-${s.id}`, level: 'warn', type: 'session_request',
+        title: `${s.name || 'A tutor'} requested a session — needs approval`,
+        detail: fmt(s.alloc_date), date: s.alloc_date,
       });
   }
 

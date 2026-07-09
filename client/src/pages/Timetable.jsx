@@ -86,7 +86,13 @@ export default function Timetable() {
       const key = a.batch_id ?? `nb-${a.id}`;
       if (!byBatch.has(key))
         byBatch.set(key, { id: a.batch_id, name: a.batch_name || '—', count: a.student_count, cells: {} });
-      byBatch.get(key).cells[a.time_slot_id] = a;
+      // One session renders per cell. An approved session always wins over a
+      // tutor's pending request for the same slot — the live grid stays truthful,
+      // and the request is still visible (and decidable) under Approvals.
+      const cells = byBatch.get(key).cells;
+      const prev = cells[a.time_slot_id];
+      if (!prev || (prev.status === 'pending' && a.status !== 'pending'))
+        cells[a.time_slot_id] = a;
     }
     return { batches: [...byBatch.values()] };
   }, [data, programId, slotIds]);
@@ -367,8 +373,11 @@ export default function Timetable() {
                     <td key={s.id}>
                       <div
                         className={'cell' + (level ? ' conf-' + level : '')
-                          + (dragOver === cellKey ? ' drag-over' : '')}
-                        title={conf ? conf.map((c) => c.message).join('\n') : ''}
+                          + (dragOver === cellKey ? ' drag-over' : '')
+                          + (a?.status === 'pending' ? ' pending' : '')}
+                        title={a?.status === 'pending'
+                          ? 'Requested by the tutor — awaiting approval'
+                          : (conf ? conf.map((c) => c.message).join('\n') : '')}
                         draggable={Boolean(canEdit && a)}
                         onDragStart={(e) => {
                           if (!canEdit || !a) return;
@@ -404,6 +413,9 @@ export default function Timetable() {
                             <div className="act">
                               {a.activity_code || ''}{' '}
                               {level && <span className={'badge ' + level}>!</span>}
+                              {a.status === 'pending' && (
+                                <span className="badge pending" title="Awaiting admin approval">⏳</span>
+                              )}
                             </div>
                             {a.faculty_name && <div className="fac">{a.faculty_name}</div>}
                             {a.room_code && <div className="room">{a.room_code}</div>}

@@ -20,12 +20,14 @@ export async function conflictsForDate(date) {
        LEFT JOIN faculty f    ON f.id = a.faculty_id
        LEFT JOIN batches b    ON b.id = a.batch_id
        LEFT JOIN time_slots ts ON ts.id = a.time_slot_id
-      WHERE a.alloc_date = ?`,
+      WHERE a.alloc_date = ? AND a.status = 'approved'`,
     [date]
   );
 
+  // Only approved leave blocks an allocation: a pending request must not start
+  // flagging the tutor's existing sessions before an admin has decided on it.
   const [leaves] = await pool.query(
-    'SELECT faculty_id FROM faculty_leave WHERE leave_date = ?',
+    "SELECT faculty_id FROM faculty_leave WHERE leave_date = ? AND status = 'approved'",
     [date]
   );
   const onLeave = new Set(leaves.map((l) => l.faculty_id));

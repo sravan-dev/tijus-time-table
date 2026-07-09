@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import api from '../api/client';
-import { useAuth } from '../auth';
+import { useAuth, roleLabel } from '../auth';
 
 export default function Users() {
   const { user, isAdmin } = useAuth();
@@ -92,7 +92,10 @@ export default function Users() {
       </div>
 
       {editing && (
-        <UserModal initial={editing} onClose={() => setEditing(null)}
+        <UserModal initial={editing}
+          /* a tutor login must attach to a faculty record that has none yet */
+          unlinkedFaculty={faculty.filter((f) => !f.user_id)}
+          onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }} />
       )}
       {credFor && (
@@ -108,24 +111,27 @@ function RoleBadge({ role }) {
     role === 'admin' ? 'var(--brand)' :
     role === 'manager' ? 'var(--accent-green)' :
     role === 'faculty' ? 'var(--accent-blue)' : 'var(--muted)';
-  return <span className="badge" style={{ background: bg }}>{role}</span>;
+  return <span className="badge" style={{ background: bg }}>{roleLabel(role)}</span>;
 }
 
 // ---- App user create/edit ----
-function UserModal({ initial, onClose, onSaved }) {
+function UserModal({ initial, unlinkedFaculty = [], onClose, onSaved }) {
   const isEdit = Boolean(initial?.id);
   const [form, setForm] = useState({
     username: initial.username || '', full_name: initial.full_name || '',
-    role: initial.role || 'viewer', password: '',
+    role: initial.role || 'viewer', password: '', faculty_id: '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const isTutor = form.role === 'faculty';
 
   async function save() {
     setErr('');
     if (!form.username) return setErr('Username is required');
     if (!isEdit && !form.password) return setErr('Password is required');
+    if (!isEdit && isTutor && !form.faculty_id)
+      return setErr('Pick the faculty record this tutor logs in as');
     setBusy(true);
     try {
       if (isEdit) {
@@ -133,7 +139,7 @@ function UserModal({ initial, onClose, onSaved }) {
         if (form.password) payload.password = form.password;
         await api.put(`/users/${initial.id}`, payload);
       } else {
-        await api.post('/users', form);
+        await api.post('/users', { ...form, faculty_id: isTutor ? form.faculty_id : null });
       }
       onSaved();
     } catch (e) { setErr(e.response?.data?.error || 'Save failed'); setBusy(false); }
@@ -151,8 +157,25 @@ function UserModal({ initial, onClose, onSaved }) {
           <select value={form.role} onChange={set('role')}>
             <option value="admin">admin — full access</option>
             <option value="manager">manager — all except Users &amp; Settings</option>
+            <option value="faculty">tutor — own schedule, sessions &amp; leave (needs approval)</option>
             <option value="viewer">viewer — read only</option>
           </select></div>
+        {/* a tutor login is meaningless without a faculty record to scope it to */}
+        {!isEdit && isTutor && (
+          <div className="field"><label>Faculty record</label>
+            <select value={form.faculty_id} onChange={set('faculty_id')}>
+              <option value="">Select the tutor…</option>
+              {unlinkedFaculty.map((f) => (
+                <option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>
+              ))}
+            </select>
+            {!unlinkedFaculty.length && (
+              <div className="sub" style={{ color: 'var(--muted)', fontSize: 12 }}>
+                Every faculty member already has a login. Add one under Manage → Faculty first.
+              </div>
+            )}
+          </div>
+        )}
         <div className="field"><label>{isEdit ? 'New password (leave blank to keep)' : 'Password'}</label>
           <input type="password" value={form.password} onChange={set('password')}
             placeholder={isEdit ? '••••••••' : ''} /></div>

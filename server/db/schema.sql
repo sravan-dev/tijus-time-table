@@ -107,13 +107,21 @@ CREATE TABLE faculty_capabilities (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Faculty leave (drives the "is faculty on leave" allocation rule)
+-- Leave applied by a tutor starts 'pending' and only counts once an admin
+-- approves it; leave entered directly by staff defaults to 'approved'.
 CREATE TABLE faculty_leave (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   faculty_id  INT NOT NULL,
   leave_date  DATE NOT NULL,
   reason      VARCHAR(160),
+  status      ENUM('pending','approved','rejected') NOT NULL DEFAULT 'approved',
+  requested_by  INT NULL,
+  decided_by    INT NULL,
+  decided_at    DATETIME NULL,
+  decision_note VARCHAR(255) NULL,
   FOREIGN KEY (faculty_id) REFERENCES faculty(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_leave (faculty_id, leave_date)
+  UNIQUE KEY uq_leave (faculty_id, leave_date),
+  KEY idx_leave_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Room blocks (maintenance / events make a room unavailable)
@@ -139,7 +147,15 @@ CREATE TABLE allocations (
   student_count INT,
   raw_text      VARCHAR(255),               -- original cell text, for reference/debugging
   note          VARCHAR(255),
+  -- Sessions proposed by a tutor start 'pending' and are excluded from conflict
+  -- checks until an admin approves them; staff-created sessions are 'approved'.
+  status        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'approved',
+  requested_by  INT NULL,
+  decided_by    INT NULL,
+  decided_at    DATETIME NULL,
+  decision_note VARCHAR(255) NULL,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_alloc_status (status),
   FOREIGN KEY (program_id)   REFERENCES programs(id),
   FOREIGN KEY (batch_id)     REFERENCES batches(id)     ON DELETE SET NULL,
   FOREIGN KEY (activity_id)  REFERENCES activities(id)  ON DELETE SET NULL,

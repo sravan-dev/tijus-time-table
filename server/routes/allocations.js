@@ -28,7 +28,9 @@ router.get('/', async (req, res) => {
   const { date, program_id } = req.query;
   if (!date) return res.status(400).json({ error: 'date is required' });
   const params = [date];
-  let sql = SELECT + ' WHERE a.alloc_date = ?';
+  // Rejected requests are kept for the tutor's own history but never belong in
+  // the grid; pending ones show through, badged, so admins can judge in context.
+  let sql = SELECT + " WHERE a.alloc_date = ? AND a.status <> 'rejected'";
   if (program_id) { sql += ' AND a.program_id = ?'; params.push(program_id); }
   sql += ' ORDER BY p.code, a.batch_id, ts.sort_order';
   const [rows] = await pool.query(sql, params);
@@ -39,7 +41,7 @@ router.get('/', async (req, res) => {
 // distinct dates that have data (for the date picker)
 router.get('/dates', async (_req, res) => {
   const [rows] = await pool.query(
-    'SELECT DISTINCT alloc_date FROM allocations ORDER BY alloc_date'
+    "SELECT DISTINCT alloc_date FROM allocations WHERE status <> 'rejected' ORDER BY alloc_date"
   );
   res.json(rows.map((r) => r.alloc_date));
 });

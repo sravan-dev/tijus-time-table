@@ -157,7 +157,20 @@ table.tt td.batch, table.tt th.batch {
 .cell[draggable="true"] { cursor: grab; }
 .cell[draggable="true"]:active { cursor: grabbing; }
 .cell.drag-over { outline: 2px dashed var(--brand); background: var(--brand-tint); }
-@media print { .cell[draggable="true"] { cursor: default; } }
+/* a tutor's session request, not yet approved by an admin */
+.cell.pending { opacity: .65; outline: 1px dashed var(--warn); }
+.cell .badge.pending { background: var(--warn); }
+@media print {
+  .cell[draggable="true"] { cursor: default; }
+  .cell.pending { display: none; }   /* never print an unapproved session */
+}
+
+/* pending-approval count on the Approvals nav item */
+.nav-badge {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  border-radius: 9px; background: var(--warn); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 17px;
+}
 .badge { display: inline-block; font-size: 12px; font-weight: 600; line-height: 1.5; padding: 2px 10px; border-radius: 11px; color: #fff; }
 /* keep the inline conflict marker inside grid cells compact */
 .cell .badge { font-size: 10px; padding: 0 6px; line-height: 1.4; }

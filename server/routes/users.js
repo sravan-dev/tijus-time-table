@@ -79,6 +79,20 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'username and password are required' });
   if (!ROLES.includes(role))
     return res.status(400).json({ error: 'invalid role' });
+
+  // A tutor login is scoped to one faculty record, and each record gets at most
+  // one login — otherwise /api/my/* would not know whose schedule to serve.
+  if (role === 'faculty') {
+    if (!faculty_id)
+      return res.status(400).json({ error: 'faculty_id is required for a tutor login' });
+    const [[fac]] = await pool.query('SELECT id FROM faculty WHERE id = ?', [faculty_id]);
+    if (!fac) return res.status(404).json({ error: 'Faculty not found' });
+    const [[taken]] = await pool.query(
+      "SELECT id FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [faculty_id]);
+    if (taken)
+      return res.status(409).json({ error: 'That faculty member already has a login' });
+  }
+
   try {
     const hash = await bcrypt.hash(password, 10);
     const [r] = await pool.query(

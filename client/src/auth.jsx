@@ -3,6 +3,9 @@ import api from './api/client';
 
 const AuthCtx = createContext(null);
 
+// The DB stores the tutor role as 'faculty'; the UI calls it "tutor" throughout.
+export const roleLabel = (role) => (role === 'faculty' ? 'tutor' : role);
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     const raw = localStorage.getItem('tijus_user');
@@ -30,6 +33,7 @@ export function AuthProvider({ children }) {
       isAdmin: user?.role === 'admin',
       isManager: user?.role === 'manager',
       isFaculty: user?.role === 'faculty',
+      isTutor: user?.role === 'faculty',   // same role, the name the UI uses
       canEdit: user?.role === 'admin' || user?.role === 'manager',
       // a manager/faculty linked to a tutor record can see their own schedule
       hasSelfSchedule: !!user?.faculty_id,
