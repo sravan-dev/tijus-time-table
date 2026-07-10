@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The server URL is entered by the user on the login screen, so it may well be a
+  plain-HTTP address on the local network (e.g. http://192.168.1.5:4000). Since
+  Android 9 cleartext is blocked by default, which would make the app fail to
+  connect with no useful error. Allow it, while still preferring HTTPS.
+
+  If you only ever point the app at an HTTPS server, set this to "false".
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
