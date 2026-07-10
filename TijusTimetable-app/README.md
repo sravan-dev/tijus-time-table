@@ -72,6 +72,35 @@ Two Android details this depends on, both configured in
   (Android blocks cleartext by default since Android 9). If you never point the
   app at a local server, set `cleartextTrafficPermitted="false"` to harden it.
 
+## Launcher icon
+
+The source logo is `learning.png` — a round badge drawn on an **opaque black
+square** (it has no alpha channel). Used as-is, every launcher would draw black
+corners around the badge, so it is pre-processed before being handed to
+`flutter_launcher_icons`:
+
+```
+python tool/make_icons.py        # learning.png -> assets/icon/*
+dart run flutter_launcher_icons  # assets/icon/* -> android/.../res/
+```
+
+`tool/make_icons.py` finds the badge, cuts it out with an anti-aliased circular
+mask (inset slightly, or the rim's blend-to-black leaves a grey halo), and
+writes:
+
+| File | Used as |
+| --- | --- |
+| `assets/icon/icon.png` | legacy icon — badge on white, unmasked |
+| `assets/icon/icon_foreground.png` | adaptive foreground — badge near full-bleed, transparent |
+
+The adaptive foreground is deliberately **not** scaled into the 72/108 safe zone
+here: `flutter_launcher_icons` already wraps it in `<inset android:inset="16%">`.
+Doing both would compound (0.67 × 0.68 ≈ 45%) and leave the badge floating in a
+fat white margin. Full-bleed in, ~66% out — just inside the safe zone.
+
+The adaptive background is a flat white (`#FFFFFF`, written to
+`res/values/colors.xml`), so the navy badge reads on any launcher mask shape.
+
 ## Building
 
 ```

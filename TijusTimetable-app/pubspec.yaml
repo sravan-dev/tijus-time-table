@@ -47,6 +47,24 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# Launcher icon. Regenerate with:
+#     python tool/make_icons.py   # rebuilds assets/icon/* from learning.png
+#     dart run flutter_launcher_icons
+#
+# The source logo is a round badge on an opaque black square, so it is masked to
+# a transparent circle first (see tool/make_icons.py) — otherwise the launcher
+# would draw black corners behind it.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icon/icon.png
+  # Adaptive icons: the launcher masks the foreground to its own shape and draws
+  # it over the background, so the badge must sit on white rather than carry its
+  # own corners.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/icon/icon_foreground.png
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
