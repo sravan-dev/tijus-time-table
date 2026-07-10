@@ -44,6 +44,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Built APK — a ~50 MB binary, rebuilt with `flutter build apk --release`.
-# Distribute it out-of-band rather than committing it (GitHub warns >50 MB).
-/TijusTimetable.apk
+# Built APKs — binaries, rebuilt from source with `flutter build apk`.
+# Distribute them out-of-band rather than committing them.
+/TijusTimetable*.apk

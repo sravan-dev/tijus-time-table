@@ -19,15 +19,32 @@ restricts to the signed-in tutor's own faculty record.
 
 ## The APK
 
-`TijusTimetable.apk` in this folder is a release build (universal, ~50 MB).
+Two release builds sit in this folder, one per CPU architecture:
 
-Install it by copying it to the phone and opening it — Android will ask you to
+| File | Size | For |
+| --- | --- | --- |
+| `TijusTimetable.apk` | ~17 MB | **arm64-v8a** — every Android phone since ~2017. Use this one. |
+| `TijusTimetable-armeabi-v7a.apk` | ~15 MB | 32-bit ARM only — older/budget devices |
+
+A single universal APK carrying all three architectures is ~50 MB, of which
+~48 MB is native libraries a given phone will never load. Splitting per ABI cuts
+the download by two thirds. (`x86_64` is built too, but it only matters for
+emulators, so it isn't distributed.)
+
+If `TijusTimetable.apk` reports *"App not installed"* on an old handset, that
+device is 32-bit — give it the `armeabi-v7a` build.
+
+Install by copying the file to the phone and opening it — Android will ask you to
 allow installs from unknown sources, since it isn't distributed via the Play
 Store. Or, with the device connected over USB debugging:
 
 ```
 adb install -r TijusTimetable.apk
 ```
+
+The splits carry distinct `versionCode`s (1001 for `armeabi-v7a`, 2001 for
+`arm64-v8a`), which Flutter offsets by ABI so a 64-bit device never sees the
+32-bit build as an upgrade.
 
 ### Signing
 
@@ -103,16 +120,30 @@ The adaptive background is a flat white (`#FFFFFF`, written to
 
 ## Building
 
+The small, per-architecture APKs that ship above:
+
 ```
 flutter pub get
+flutter build apk --release --split-per-abi \
+  --obfuscate --split-debug-info=build/symbols \
+  --extra-gen-snapshot-options=--strip
+
+cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   TijusTimetable.apk
+cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk TijusTimetable-armeabi-v7a.apk
+```
+
+`--obfuscate` needs `--split-debug-info`, which writes the symbol files to
+`build/symbols` — keep them if you ever need to de-obfuscate a stack trace.
+`--extra-gen-snapshot-options=--strip` drops DWARF debug data from the AOT
+library; it silences a build warning but does not measurably shrink the APK,
+since the debug sections compress away anyway.
+
+A single universal APK (~50 MB, all architectures) if you'd rather hand out one
+file:
+
+```
 flutter build apk --release
 cp build/app/outputs/flutter-apk/app-release.apk TijusTimetable.apk
-```
-
-A smaller, per-architecture set of APKs:
-
-```
-flutter build apk --release --split-per-abi
 ```
 
 ## Tests
