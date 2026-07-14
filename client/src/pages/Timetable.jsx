@@ -29,6 +29,9 @@ export default function Timetable() {
   const dragRef = useRef(null);           // allocation being dragged
   const [dragOver, setDragOver] = useState(null); // cellKey of the current drop target
   const [moving, setMoving] = useState(false);
+  // A drop awaiting confirmation: { src, batch:{id,name}, slot:{id,label}, target }.
+  // The move is only applied once the admin clicks Apply in the modal.
+  const [pendingMove, setPendingMove] = useState(null);
   // Undo/redo history for drag moves. Each entry is a list of position changes:
   // { id, from:{batch_id,time_slot_id}, to:{batch_id,time_slot_id} }.
   const [undoStack, setUndoStack] = useState([]);
@@ -398,7 +401,16 @@ export default function Timetable() {
                           const src = dragRef.current;
                           dragRef.current = null;
                           setDragOver(null);
-                          if (src) moveSession(src, b.id, s.id, a);
+                          // Ignore a no-op drop (onto itself or its own cell);
+                          // otherwise stage it for confirmation in the modal.
+                          if (!src || (a && a.id === src.id)) return;
+                          if (src.batch_id === b.id && src.time_slot_id === s.id) return;
+                          setPendingMove({
+                            src,
+                            batch: { id: b.id, name: b.name },
+                            slot: { id: s.id, label: s.label },
+                            target: a || null,
+                          });
                         }}
                         onClick={() => canEdit && !moving && setEditing(
                           a || { programId, date, batch_id: b.id, time_slot_id: s.id }
@@ -501,8 +513,44 @@ export default function Timetable() {
           onSaved={() => { setReassigning(null); reload(); }}
         />
       )}
+
+      {pendingMove && (
+        <div className="modal-bg" onClick={() => setPendingMove(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{pendingMove.target ? 'Swap sessions?' : 'Move session?'}</h3>
+            {pendingMove.target ? (
+              <p style={{ margin: '4px 0 14px' }}>
+                Swap <b>{describeSession(pendingMove.src)}</b> with{' '}
+                <b>{describeSession(pendingMove.target)}</b>. The two sessions
+                change places.
+              </p>
+            ) : (
+              <p style={{ margin: '4px 0 14px' }}>
+                Move <b>{describeSession(pendingMove.src)}</b> to{' '}
+                <b>{pendingMove.batch.name} · {pendingMove.slot.label}</b>.
+              </p>
+            )}
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn ghost" onClick={() => setPendingMove(null)}>Cancel</button>
+              <button className="btn" onClick={() => {
+                const pm = pendingMove;
+                setPendingMove(null);
+                moveSession(pm.src, pm.batch.id, pm.slot.id, pm.target);
+              }}>Apply</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// A short human label for a session cell: activity / faculty / room, falling
+// back to the raw imported text.
+function describeSession(a) {
+  if (!a) return 'this session';
+  return [a.activity_code, a.faculty_name, a.room_code].filter(Boolean).join(' · ')
+    || a.raw_text || 'this session';
 }
 
 function EmailSchedules({ date }) {
