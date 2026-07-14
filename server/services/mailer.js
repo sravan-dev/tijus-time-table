@@ -44,6 +44,38 @@ export async function sendMail({ to, subject, html, text, replyTo }) {
     : sendViaSmtp(s, { from, to, subject, html, text, replyTo });
 }
 
+// Support-form mail goes through a dedicated Gmail SMTP account, independent of
+// the app-wide provider (Resend) in Settings. That keeps support reachable even
+// if the main provider is misconfigured, and lets it come from a mailbox the
+// team monitors. Credentials live in server/.env (SUPPORT_SMTP_*), never in the
+// database or the repo.
+export async function sendSupportMail({ to, subject, html, text, replyTo }) {
+  const user = process.env.SUPPORT_SMTP_USER;
+  // App passwords are shown grouped ("cufp fkuv qnpd qzzl"); the spaces aren't
+  // part of the secret, so strip any whitespace before authenticating.
+  const pass = (process.env.SUPPORT_SMTP_PASS || '').replace(/\s+/g, '');
+  if (!user || !pass)
+    throw new Error('Support email is not configured (SUPPORT_SMTP_USER / SUPPORT_SMTP_PASS)');
+
+  const recipient = to || process.env.SUPPORT_EMAIL_TO || 'sravan@tijusacademy.com';
+  const transport = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user, pass },
+  });
+  // Gmail forces From to the authenticated mailbox, so send as that account with
+  // a friendly name; the reporter (when known) goes in Reply-To.
+  return transport.sendMail({
+    from: `Tijus Timetable Support <${user}>`,
+    to: recipient,
+    subject,
+    html,
+    text,
+    replyTo: replyTo || undefined,
+  });
+}
+
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDate = (iso) => {
   const [y, m, d] = String(iso).slice(0, 10).split('-');
