@@ -179,6 +179,72 @@ router.post('/faculty/:facultyId/resend-credentials', async (req, res) => {
   res.json({ ok: true, sent_to: to });
 });
 
+// Edit a faculty member's details from the "Faculty logins" section: their name
+// and email (on the faculty record) plus, when they have a login, the username
+// and password on that account. full_name mirrors the faculty name, matching how
+// the credentials endpoint keeps it. If there is no login yet, supplying BOTH a
+// username and password creates one (role 'faculty'); leaving them blank just
+// updates the name/email. Runs in a transaction so a duplicate username can't
+// leave a half-applied rename behind.
+router.put('/faculty/:facultyId', async (req, res) => {
+  const facultyId = Number(req.params.facultyId);
+  if (!Number.isInteger(facultyId)) return res.status(400).json({ error: 'Invalid faculty id' });
+  const { faculty_name, email, username, password } = req.body || {};
+  const name = (faculty_name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Faculty name is required' });
+  const addr = (email || '').trim() || null;
+  const uname = (username || '').trim();
+
+  const [[fac]] = await pool.query('SELECT id FROM faculty WHERE id = ?', [facultyId]);
+  if (!fac) return res.status(404).json({ error: 'Faculty not found' });
+
+  const [[user]] = await pool.query(
+    "SELECT id FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [facultyId]);
+
+  // Creating a login from the edit form needs both a username and a password.
+  if (!user && (uname || password) && (!uname || !password))
+    return res.status(400).json({ error: 'To create a login, enter both a username and a password' });
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('UPDATE faculty SET name = ?, email = ? WHERE id = ?', [name, addr, facultyId]);
+
+    if (user) {
+      // Keep full_name in sync with the (possibly renamed) faculty record; only
+      // touch username/password when the admin actually supplied them.
+      const sets = ['full_name = ?'];
+      const vals = [name];
+      if (uname) { sets.push('username = ?'); vals.push(uname); }
+      if (password) { sets.push('password_hash = ?'); vals.push(await bcrypt.hash(password, 10)); }
+      vals.push(user.id);
+      await conn.query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, vals);
+    } else if (uname && password) {
+      // There is no DB UNIQUE on users.faculty_id, so guard the "one login per
+      // faculty" invariant here: refuse if any account is already linked (e.g. a
+      // login demoted out of the faculty/manager roles still occupies this
+      // faculty_id, which the role-filtered check above would miss).
+      const [[linked]] = await conn.query('SELECT id FROM users WHERE faculty_id = ? LIMIT 1', [facultyId]);
+      if (linked) {
+        await conn.rollback();
+        return res.status(409).json({ error: 'This faculty already has a linked account' });
+      }
+      await conn.query(
+        'INSERT INTO users (username, password_hash, full_name, role, faculty_id) VALUES (?, ?, ?, ?, ?)',
+        [uname, await bcrypt.hash(password, 10), name, 'faculty', facultyId]);
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    await conn.rollback();
+    if (e.code === 'ER_DUP_ENTRY')
+      return res.status(409).json({ error: 'That faculty name or username is already in use' });
+    throw e;
+  } finally {
+    conn.release();
+  }
+});
+
 router.post('/', async (req, res) => {
   const { username, password, full_name = null, role = 'viewer',
     faculty_id = null, email = null } = req.body || {};

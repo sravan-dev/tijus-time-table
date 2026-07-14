@@ -10,6 +10,7 @@ export default function Users() {
   const [editing, setEditing] = useState(null);   // app-user modal
   const [credFor, setCredFor] = useState(null);    // faculty-login modal
   const [resendFor, setResendFor] = useState(null); // resend-credentials modal
+  const [editFacFor, setEditFacFor] = useState(null); // edit-faculty-details modal
   const [err, setErr] = useState('');
   const [note, setNote] = useState('');
 
@@ -89,6 +90,8 @@ export default function Users() {
                     : <span className="badge" style={{ background: 'var(--muted)' }}>no login</span>}
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button className="btn sm ghost" onClick={() => setEditFacFor(f)}
+                    title="Edit name, email, username & password">Edit</button>{' '}
                   <button className="btn sm ghost" onClick={() => setCredFor(f)}>
                     {f.user_id ? 'Reset password' : 'Create login'}
                   </button>{' '}
@@ -118,6 +121,10 @@ export default function Users() {
       {resendFor && (
         <ResendCredModal faculty={resendFor} onClose={() => setResendFor(null)}
           onSent={(to) => { setResendFor(null); setNote(`Login details emailed to ${to}`); load(); }} />
+      )}
+      {editFacFor && (
+        <FacultyEditModal faculty={editFacFor} onClose={() => setEditFacFor(null)}
+          onSaved={() => { setEditFacFor(null); load(); }} />
       )}
     </div>
   );
@@ -289,6 +296,65 @@ function FacultyCredModal({ faculty, onClose, onSaved }) {
           </select></div>
         <div className="field"><label>{isReset ? 'New password' : 'Password'}</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+        {err && <div className="err">{err}</div>}
+        <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Edit a faculty member's details (name, email, and their login's
+// username/password). Updating name/email always works; username/password apply
+// to an existing login, or create one when both are given for a no-login tutor.
+function FacultyEditModal({ faculty, onClose, onSaved }) {
+  const hasLogin = Boolean(faculty.user_id);
+  const [name, setName] = useState(faculty.faculty_name || '');
+  const [email, setEmail] = useState(faculty.email || '');
+  const [username, setUsername] = useState(faculty.username || '');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function save() {
+    setErr('');
+    if (!name.trim()) return setErr('Faculty name is required');
+    if (!hasLogin && (username.trim() || password) && !(username.trim() && password))
+      return setErr('To create a login, enter both a username and a password');
+    setBusy(true);
+    try {
+      await api.put(`/users/faculty/${faculty.faculty_id}`, {
+        faculty_name: name.trim(),
+        email: email.trim(),
+        username: username.trim(),
+        password: password || undefined,
+      });
+      onSaved();
+    } catch (e) { setErr(e.response?.data?.error || 'Save failed'); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Edit faculty · {faculty.faculty_name}</h3>
+        <div className="field"><label>Faculty name</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></div>
+        <div className="field"><label>Email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="tutor@example.com" /></div>
+        <div className="field"><label>Username</label>
+          <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+            placeholder={hasLogin ? '' : 'set a username to create a login'} /></div>
+        <div className="field"><label>{hasLogin ? 'New password (leave blank to keep)' : 'Password'}</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder={hasLogin ? '••••••••' : 'set a password to create a login'} /></div>
+        {!hasLogin && (
+          <div className="sub" style={{ color: 'var(--muted)', fontSize: 12, marginTop: -4 }}>
+            No login yet — fill in both username and password to create one.
+          </div>
+        )}
         {err && <div className="err">{err}</div>}
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
