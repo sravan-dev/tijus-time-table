@@ -195,20 +195,27 @@ router.put('/faculty/:facultyId', async (req, res) => {
   const addr = (email || '').trim() || null;
   const uname = (username || '').trim();
 
-  const [[fac]] = await pool.query('SELECT id FROM faculty WHERE id = ?', [facultyId]);
+  const [[fac]] = await pool.query('SELECT id, email FROM faculty WHERE id = ?', [facultyId]);
   if (!fac) return res.status(404).json({ error: 'Faculty not found' });
 
   const [[user]] = await pool.query(
-    "SELECT id FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [facultyId]);
+    "SELECT id, username FROM users WHERE faculty_id = ? AND role IN ('faculty','manager')", [facultyId]);
 
   // Creating a login from the edit form needs both a username and a password.
   if (!user && (uname || password) && (!uname || !password))
     return res.status(400).json({ error: 'To create a login, enter both a username and a password' });
 
+  // Credentials to email after commit — set only when a plaintext password is
+  // supplied (an unchanged password is stored hashed and can't be resent).
+  let mailCreds = null;
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    await conn.query('UPDATE faculty SET name = ?, email = ? WHERE id = ?', [name, addr, facultyId]);
+    // Blank email means "keep the stored address" (matching resolveTutorFaculty
+    // and resend-credentials) — only overwrite when a new address was typed.
+    if (addr) await conn.query('UPDATE faculty SET name = ?, email = ? WHERE id = ?', [name, addr, facultyId]);
+    else await conn.query('UPDATE faculty SET name = ? WHERE id = ?', [name, facultyId]);
 
     if (user) {
       // Keep full_name in sync with the (possibly renamed) faculty record; only
@@ -219,6 +226,7 @@ router.put('/faculty/:facultyId', async (req, res) => {
       if (password) { sets.push('password_hash = ?'); vals.push(await bcrypt.hash(password, 10)); }
       vals.push(user.id);
       await conn.query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, vals);
+      if (password) mailCreds = { username: uname || user.username, password };
     } else if (uname && password) {
       // There is no DB UNIQUE on users.faculty_id, so guard the "one login per
       // faculty" invariant here: refuse if any account is already linked (e.g. a
@@ -232,13 +240,72 @@ router.put('/faculty/:facultyId', async (req, res) => {
       await conn.query(
         'INSERT INTO users (username, password_hash, full_name, role, faculty_id) VALUES (?, ?, ?, ?, ?)',
         [uname, await bcrypt.hash(password, 10), name, 'faculty', facultyId]);
+      mailCreds = { username: uname, password };
     }
     await conn.commit();
-    res.json({ ok: true });
   } catch (e) {
     await conn.rollback();
     if (e.code === 'ER_DUP_ENTRY')
       return res.status(409).json({ error: 'That faculty name or username is already in use' });
+    throw e;
+  } finally {
+    conn.release();
+  }
+
+  // The save is committed; email the login details when a password was set. A
+  // mail failure is reported as a warning, not an error — the admin typed the
+  // password and can pass it on manually. sendMail throws if SMTP is disabled.
+  let emailed = false, emailError = null, mailSentTo = null;
+  if (mailCreds) {
+    try {
+      const to = addr || fac.email; // fall back to the address already on file
+      if (!to) throw new Error('No email address on file for this tutor');
+      const settings = await getSettings();
+      const { subject, html, text } = credentialsEmail(
+        name, { username: mailCreds.username, password: mailCreds.password, url: req.headers.origin || null },
+        settings.app_title);
+      await sendMail({ to, subject, html, text });
+      emailed = true;
+      mailSentTo = to;
+    } catch (e) { emailError = e.message; }
+  }
+
+  res.json({ ok: true, emailed, sent_to: emailed ? mailSentTo : undefined, email_error: emailError || undefined });
+});
+
+// Delete a faculty member outright: the faculty record plus their login.
+// Capabilities and leave rows cascade in the DB; allocations keep the class but
+// lose the tutor (faculty_id is ON DELETE SET NULL). users.faculty_id is also
+// SET NULL, which would strand a tutor login with no faculty record — so the
+// linked account is deleted explicitly in the same transaction.
+router.delete('/faculty/:facultyId', async (req, res) => {
+  const facultyId = Number(req.params.facultyId);
+  if (!Number.isInteger(facultyId)) return res.status(400).json({ error: 'Invalid faculty id' });
+  const [[fac]] = await pool.query('SELECT id FROM faculty WHERE id = ?', [facultyId]);
+  if (!fac) return res.status(404).json({ error: 'Faculty not found' });
+
+  const [linked] = await pool.query('SELECT id, role FROM users WHERE faculty_id = ?', [facultyId]);
+  if (linked.some((u) => u.id === req.user.id))
+    return res.status(400).json({ error: 'You cannot delete the faculty linked to your own account' });
+  // Mirrors the last-admin guard on DELETE /:id, in case an admin account ended
+  // up linked to this faculty record.
+  const linkedAdmins = linked.filter((u) => u.role === 'admin').length;
+  if (linkedAdmins) {
+    const [[{ admins }]] = await pool.query(
+      "SELECT COUNT(*) AS admins FROM users WHERE role = 'admin'");
+    if (admins <= linkedAdmins)
+      return res.status(400).json({ error: 'Cannot delete the last remaining admin' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM users WHERE faculty_id = ?', [facultyId]);
+    await conn.query('DELETE FROM faculty WHERE id = ?', [facultyId]);
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    await conn.rollback();
     throw e;
   } finally {
     conn.release();

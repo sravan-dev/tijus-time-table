@@ -12,7 +12,7 @@ export default function Users() {
   const [resendFor, setResendFor] = useState(null); // resend-credentials modal
   const [editFacFor, setEditFacFor] = useState(null); // edit-faculty-details modal
   const [err, setErr] = useState('');
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(null); // { text, ok } | null — ok=false shows a warning colour
 
   const load = () => {
     api.get('/users').then((r) => setRows(r.data)).catch(() => {});
@@ -29,6 +29,13 @@ export default function Users() {
     catch (e) { setErr(e.response?.data?.error || 'Delete failed'); }
   }
 
+  async function delFaculty(f) {
+    if (!confirm(`Delete faculty "${f.faculty_name}"?\n\nTheir login is removed too, and any classes assigned to them stay on the timetable but become unassigned.`)) return;
+    setErr('');
+    try { await api.delete(`/users/faculty/${f.faculty_id}`); load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Delete failed'); }
+  }
+
   // tutor-linked accounts (faculty or manager) are managed in the Faculty logins
   // section, so keep them out of the App users table to avoid duplicates.
   const appUsers = rows.filter((u) => !u.faculty_id);
@@ -41,8 +48,8 @@ export default function Users() {
       </div>
       {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
       {note && (
-        <div className="card" style={{ marginBottom: 10, borderColor: 'var(--accent-green)' }}>
-          {note} <button className="btn sm ghost" onClick={() => setNote('')}>Dismiss</button>
+        <div className="card" style={{ marginBottom: 10, borderColor: note.ok === false ? 'var(--warn)' : 'var(--accent-green)' }}>
+          {note.text} <button className="btn sm ghost" onClick={() => setNote(null)}>Dismiss</button>
         </div>
       )}
 
@@ -97,11 +104,15 @@ export default function Users() {
                   </button>{' '}
                   {/* only meaningful once they have a login to send */}
                   {f.user_id && (
-                    <button className="btn sm ghost" onClick={() => setResendFor(f)}
-                      title="Set a new password and email it to this tutor">
-                      ✉ Resend details
-                    </button>
+                    <>
+                      <button className="btn sm ghost" onClick={() => setResendFor(f)}
+                        title="Set a new password and email it to this tutor">
+                        ✉ Resend details
+                      </button>{' '}
+                    </>
                   )}
+                  <button className="btn sm danger" onClick={() => delFaculty(f)}
+                    title="Delete this faculty member and their login">Delete</button>
                 </td>
               </tr>
             ))}
@@ -120,11 +131,16 @@ export default function Users() {
       )}
       {resendFor && (
         <ResendCredModal faculty={resendFor} onClose={() => setResendFor(null)}
-          onSent={(to) => { setResendFor(null); setNote(`Login details emailed to ${to}`); load(); }} />
+          onSent={(to) => { setResendFor(null); setNote({ text: `Login details emailed to ${to}`, ok: true }); load(); }} />
       )}
       {editFacFor && (
         <FacultyEditModal faculty={editFacFor} onClose={() => setEditFacFor(null)}
-          onSaved={() => { setEditFacFor(null); load(); }} />
+          onSaved={(res) => {
+            setEditFacFor(null);
+            if (res?.emailed) setNote({ text: `Saved · login details emailed to ${res.sent_to}`, ok: true });
+            else if (res?.email_error) setNote({ text: `Saved, but the login email wasn’t sent: ${res.email_error}`, ok: false });
+            load();
+          }} />
       )}
     </div>
   );
@@ -325,13 +341,13 @@ function FacultyEditModal({ faculty, onClose, onSaved }) {
       return setErr('To create a login, enter both a username and a password');
     setBusy(true);
     try {
-      await api.put(`/users/faculty/${faculty.faculty_id}`, {
+      const { data } = await api.put(`/users/faculty/${faculty.faculty_id}`, {
         faculty_name: name.trim(),
         email: email.trim(),
         username: username.trim(),
         password: password || undefined,
       });
-      onSaved();
+      onSaved(data);
     } catch (e) { setErr(e.response?.data?.error || 'Save failed'); setBusy(false); }
   }
 
@@ -355,6 +371,9 @@ function FacultyEditModal({ faculty, onClose, onSaved }) {
             No login yet — fill in both username and password to create one.
           </div>
         )}
+        <div className="sub" style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
+          Setting a password emails the username &amp; password to the tutor’s email.
+        </div>
         {err && <div className="err">{err}</div>}
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
