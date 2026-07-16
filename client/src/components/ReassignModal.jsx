@@ -3,13 +3,17 @@ import api from '../api/client';
 
 const MODULE_BY_LETTER = { R: 'READING', W: 'WRITING', L: 'LISTENING', S: 'SPEAKING' };
 
-// Reassign the faculty on a (usually clashing) session. Shows the related
-// sessions it conflicts with, and marks which faculty are free in this slot
-// and capable of the activity's module (from the capability matrix).
-export default function ReassignModal({ allocation, programId, dayAllocations = [], onClose, onSaved }) {
+// Reassign the faculty on a (usually clashing) session — or, with mode="add",
+// put an additional faculty on the same class by creating a second session in
+// the same batch/slot/activity (`date` is required for that insert). Shows the
+// related sessions it conflicts with, and marks which faculty are free in this
+// slot and capable of the activity's module (from the capability matrix).
+export default function ReassignModal({ allocation, programId, date, mode = 'reassign',
+  dayAllocations = [], onClose, onSaved }) {
+  const adding = mode === 'add';
   const [faculty, setFaculty] = useState([]);
   const [caps, setCaps] = useState(null); // null = not loaded / unavailable
-  const [facultyId, setFacultyId] = useState(allocation.faculty_id ?? '');
+  const [facultyId, setFacultyId] = useState(adding ? '' : allocation.faculty_id ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -25,14 +29,17 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
 
   const module = MODULE_BY_LETTER[(allocation.activity_code || '')[0]?.toUpperCase()] || null;
 
-  // faculty already booked in this slot (other sessions) -> picking them clashes
+  // faculty already booked in this slot (other sessions) -> picking them clashes.
+  // When adding a co-teacher the clicked session keeps its faculty, so that
+  // session counts too — picking the same tutor again would double-book them.
   const busyIds = useMemo(() => {
     const s = new Set();
     for (const x of dayAllocations)
-      if (x.time_slot_id === allocation.time_slot_id && x.faculty_id && x.id !== allocation.id)
+      if (x.time_slot_id === allocation.time_slot_id && x.faculty_id
+        && (adding || x.id !== allocation.id))
         s.add(x.faculty_id);
     return s;
-  }, [dayAllocations, allocation]);
+  }, [dayAllocations, allocation, adding]);
 
   // faculty capable of this module (or GENERAL). null = no module or no
   // capability data available -> don't mark anyone (still list every tutor).
@@ -60,7 +67,22 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
   async function save() {
     setBusy(true); setErr('');
     try {
-      await api.put(`/allocations/${allocation.id}`, { faculty_id: facultyId || null });
+      if (adding) {
+        // A co-teacher is a second session in the same cell: same batch, slot
+        // and activity. The room is deliberately left empty — copying it would
+        // instantly flag a room double-booking.
+        await api.post('/allocations', {
+          alloc_date: date,
+          program_id: programId,
+          batch_id: allocation.batch_id ?? null,
+          time_slot_id: allocation.time_slot_id,
+          activity_id: allocation.activity_id ?? null,
+          classroom_id: null,
+          faculty_id: facultyId,
+        });
+      } else {
+        await api.put(`/allocations/${allocation.id}`, { faculty_id: facultyId || null });
+      }
       onSaved();
     } catch (e) {
       setErr(e.response?.data?.error || 'Save failed');
@@ -74,13 +96,13 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Reassign faculty</h3>
+        <h3>{adding ? 'Add additional faculty' : 'Reassign faculty'}</h3>
         <div className="sub" style={{ marginBottom: 10 }}>
           {(allocation.batch_name || '—')} · {allocation.slot_label} · {allocation.activity_code || 'session'}
-          {' '}— currently <b>{allocation.faculty_name || 'unassigned'}</b>
+          {' '}— {adding ? 'alongside' : 'currently'} <b>{allocation.faculty_name || 'unassigned'}</b>
         </div>
 
-        {related.length > 0 && (
+        {!adding && related.length > 0 && (
           <div className="card" style={{ borderColor: 'var(--error)', marginBottom: 12, padding: 10 }}>
             <b>Clashes with</b>
             <ul className="conf-list" style={{ marginTop: 6 }}>
@@ -95,9 +117,9 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
         )}
 
         <div className="field">
-          <label>New faculty{module ? ` (for ${module.toLowerCase()})` : ''}</label>
+          <label>{adding ? 'Additional' : 'New'} faculty{module ? ` (for ${module.toLowerCase()})` : ''}</label>
           <select value={facultyId} onChange={(e) => setFacultyId(e.target.value)}>
-            <option value="">— unassigned —</option>
+            <option value="">{adding ? '— pick a faculty —' : '— unassigned —'}</option>
             {options.map((f) => {
               const free = !busyIds.has(f.id);
               const capable = capableIds && capableIds.has(f.id); // only when data is available
@@ -119,7 +141,9 @@ export default function ReassignModal({ allocation, programId, dayAllocations = 
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
           <span style={{ flex: 1 }} />
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Reassign'}</button>
+          <button className="btn" onClick={save} disabled={busy || (adding && !facultyId)}>
+            {busy ? 'Saving…' : adding ? 'Add faculty' : 'Reassign'}
+          </button>
         </div>
       </div>
     </div>

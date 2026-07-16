@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
 import ReassignModal from '../components/ReassignModal';
+import BatchModal from '../components/BatchModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
@@ -21,8 +22,10 @@ export default function Timetable() {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // {batchId, slotId} or allocation
   const [editingSlot, setEditingSlot] = useState(null); // time slot being re-timed
-  const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation }
+  const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation } or { x, y, batch }
   const [reassigning, setReassigning] = useState(null); // allocation being reassigned
+  const [addingFaculty, setAddingFaculty] = useState(null); // allocation getting a co-teacher
+  const [editingBatch, setEditingBatch] = useState(null); // batch id being edited (right-click)
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -88,14 +91,21 @@ export default function Timetable() {
       if (slotIds.size && !slotIds.has(a.time_slot_id)) continue; // slot not in this grid
       const key = a.batch_id ?? `nb-${a.id}`;
       if (!byBatch.has(key))
-        byBatch.set(key, { id: a.batch_id, name: a.batch_name || '—', count: a.student_count, cells: {} });
-      // One session renders per cell. An approved session always wins over a
+        byBatch.set(key, { id: a.batch_id, name: a.batch_name || '—', count: a.student_count, cells: {}, extra: {} });
+      // One session leads each cell. An approved session always wins over a
       // tutor's pending request for the same slot — the live grid stays truthful,
-      // and the request is still visible (and decidable) under Approvals.
-      const cells = byBatch.get(key).cells;
-      const prev = cells[a.time_slot_id];
-      if (!prev || (prev.status === 'pending' && a.status !== 'pending'))
-        cells[a.time_slot_id] = a;
+      // and the request is still visible (and decidable) under Approvals. Any
+      // further sessions in the same cell (e.g. an additional faculty on the
+      // same class) land in `extra` and render as "+ name" lines underneath.
+      const row = byBatch.get(key);
+      const prev = row.cells[a.time_slot_id];
+      if (!prev) row.cells[a.time_slot_id] = a;
+      else if (prev.status === 'pending' && a.status !== 'pending') {
+        row.cells[a.time_slot_id] = a;
+        (row.extra[a.time_slot_id] ??= []).push(prev);
+      } else {
+        (row.extra[a.time_slot_id] ??= []).push(a);
+      }
     }
     return { batches: [...byBatch.values()] };
   }, [data, programId, slotIds]);
@@ -143,8 +153,20 @@ export default function Timetable() {
     return batches
       .map((b) => {
         const cells = {};
-        for (const [sid, a] of Object.entries(b.cells)) if (a.faculty_id === fid) cells[sid] = a;
-        return { ...b, cells };
+        const extra = {};
+        for (const [sid, a] of Object.entries(b.cells)) {
+          // keep the cell when the lead session or any extra matches; promote
+          // a matching extra to lead when the lead itself is filtered out
+          const xs = (b.extra[sid] || []).filter((x) => x.faculty_id === fid);
+          if (a.faculty_id === fid) {
+            cells[sid] = a;
+            if (xs.length) extra[sid] = xs;
+          } else if (xs.length) {
+            cells[sid] = xs[0];
+            if (xs.length > 1) extra[sid] = xs.slice(1);
+          }
+        }
+        return { ...b, cells, extra };
       })
       .filter((b) => Object.keys(b.cells).length);
   }, [batches, facultyId]);
@@ -363,11 +385,18 @@ export default function Timetable() {
           <tbody>
             {visibleBatches.map((b) => (
               <tr key={b.id ?? b.name}>
-                <td className="batch">
+                <td className="batch"
+                  title={canEdit && b.id ? 'Right-click to edit this batch' : undefined}
+                  onContextMenu={(e) => {
+                    if (!canEdit || !b.id) return; // batch-less rows have nothing to edit
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, batch: b });
+                  }}>
                   {b.name}{b.count ? <span className="room"> ({b.count})</span> : null}
                 </td>
                 {slots.map((s) => {
                   const a = b.cells[s.id];
+                  const extras = b.extra?.[s.id] || [];
                   const conf = a ? data.conflicts[a.id] : null;
                   const level = conf?.some((c) => c.level === 'error') ? 'error'
                     : conf?.length ? 'warn' : null;
@@ -434,6 +463,33 @@ export default function Timetable() {
                             {!a.activity_code && !a.faculty_name && (
                               <div className="room">{a.raw_text}</div>
                             )}
+                            {extras.map((x) => {
+                              const xc = data.conflicts[x.id];
+                              const xl = xc?.some((c) => c.level === 'error') ? 'error'
+                                : xc?.length ? 'warn' : null;
+                              return (
+                                <div key={x.id} className="fac extra"
+                                  title={xc ? xc.map((c) => c.message).join('\n')
+                                    : (canEdit ? 'Additional faculty — click to edit' : undefined)}
+                                  onClick={(e) => {
+                                    if (!canEdit || moving) return;
+                                    e.stopPropagation();
+                                    setEditing(x);
+                                  }}
+                                  onContextMenu={(e) => {
+                                    if (!canEdit) return;
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x });
+                                  }}>
+                                  + {x.faculty_name || x.activity_code || x.raw_text || 'session'}
+                                  {xl && <span className={'badge ' + xl}>!</span>}
+                                  {x.status === 'pending' && (
+                                    <span className="badge pending" title="Awaiting admin approval">⏳</span>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </>
                         ) : null}
                       </div>
@@ -484,22 +540,35 @@ export default function Timetable() {
           onClick={() => setMenu(null)}
           onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
           <div className="ctx-menu" style={{ top: menu.y, left: menu.x }} onClick={(e) => e.stopPropagation()}>
-            <button className="ctx-item"
-              onClick={() => { setReassigning(menu.allocation); setMenu(null); }}>
-              Reassign faculty…
-            </button>
-            <button className="ctx-item"
-              onClick={() => {
-                const a = menu.allocation;
-                setEditing({ programId, date, batch_id: a.batch_id, time_slot_id: a.time_slot_id });
-                setMenu(null);
-              }}>
-              Add additional session…
-            </button>
-            <button className="ctx-item danger"
-              onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
-              Clear session
-            </button>
+            {menu.batch ? (
+              <button className="ctx-item"
+                onClick={() => { setEditingBatch(menu.batch.id); setMenu(null); }}>
+                Edit batch…
+              </button>
+            ) : (
+              <>
+                <button className="ctx-item"
+                  onClick={() => { setReassigning(menu.allocation); setMenu(null); }}>
+                  Reassign faculty…
+                </button>
+                <button className="ctx-item"
+                  onClick={() => { setAddingFaculty(menu.allocation); setMenu(null); }}>
+                  Add additional faculty…
+                </button>
+                <button className="ctx-item"
+                  onClick={() => {
+                    const a = menu.allocation;
+                    setEditing({ programId, date, batch_id: a.batch_id, time_slot_id: a.time_slot_id });
+                    setMenu(null);
+                  }}>
+                  Add additional session…
+                </button>
+                <button className="ctx-item danger"
+                  onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
+                  Clear session
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -511,6 +580,27 @@ export default function Timetable() {
           dayAllocations={data.allocations}
           onClose={() => setReassigning(null)}
           onSaved={() => { setReassigning(null); reload(); }}
+        />
+      )}
+
+      {addingFaculty && (
+        <ReassignModal
+          mode="add"
+          allocation={addingFaculty}
+          programId={programId}
+          date={date}
+          dayAllocations={data.allocations}
+          onClose={() => setAddingFaculty(null)}
+          onSaved={() => { setAddingFaculty(null); reload(); }}
+        />
+      )}
+
+      {editingBatch && (
+        <BatchModal
+          batchId={editingBatch}
+          programId={programId}
+          onClose={() => setEditingBatch(null)}
+          onSaved={() => { setEditingBatch(null); reload(); }}
         />
       )}
 
