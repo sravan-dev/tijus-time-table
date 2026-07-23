@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 
 // Edit a batch's details straight from the timetable (right-click the batch
-// column). PUT /batches/:id replaces every column, so the full row is loaded
-// first and unedited fields (program, exam month, active) are sent back as-is.
+// column), or create a new one when `batchId` is null. PUT /batches/:id
+// replaces every column, so the full row is loaded first and unedited fields
+// (program, exam month, active) are sent back as-is. On create, onSaved
+// receives the new batch id so the caller can chain into "Add session".
 export default function BatchModal({ batchId, programId, onClose, onSaved }) {
+  const creating = !batchId;
   const [row, setRow] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [form, setForm] = useState({ name: '', student_count: 0, home_room_id: '' });
@@ -18,6 +21,7 @@ export default function BatchModal({ batchId, programId, onClose, onSaved }) {
         api.get('/classrooms'),
       ]);
       setRooms(rs);
+      if (creating) return;
       const b = batches.find((x) => x.id === batchId);
       if (!b) { setErr('Batch not found'); return; }
       setRow(b);
@@ -35,13 +39,23 @@ export default function BatchModal({ batchId, programId, onClose, onSaved }) {
     if (!form.name.trim()) { setErr('Name is required'); return; }
     setBusy(true); setErr('');
     try {
-      await api.put(`/batches/${batchId}`, {
-        ...row,
-        name: form.name.trim(),
-        student_count: Number(form.student_count) || 0,
-        home_room_id: form.home_room_id || null,
-      });
-      onSaved();
+      if (creating) {
+        const { data } = await api.post('/batches', {
+          name: form.name.trim(),
+          program_id: programId,
+          student_count: Number(form.student_count) || 0,
+          home_room_id: form.home_room_id || null,
+        });
+        onSaved(data.id);
+      } else {
+        await api.put(`/batches/${batchId}`, {
+          ...row,
+          name: form.name.trim(),
+          student_count: Number(form.student_count) || 0,
+          home_room_id: form.home_room_id || null,
+        });
+        onSaved();
+      }
     } catch (e) {
       setErr(e.response?.data?.error || 'Save failed');
       setBusy(false);
@@ -51,20 +65,22 @@ export default function BatchModal({ batchId, programId, onClose, onSaved }) {
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Edit batch</h3>
+        <h3>{creating ? 'Add batch' : 'Edit batch'}</h3>
         <div className="field">
           <label>Name</label>
-          <input type="text" value={form.name} onChange={set('name')} disabled={!row} />
+          <input type="text" value={form.name} onChange={set('name')}
+            disabled={!creating && !row} autoFocus />
         </div>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label>Students</label>
             <input type="number" min="0" value={form.student_count}
-              onChange={set('student_count')} disabled={!row} />
+              onChange={set('student_count')} disabled={!creating && !row} />
           </div>
           <div className="field" style={{ flex: 1 }}>
             <label>Home room</label>
-            <select value={form.home_room_id} onChange={set('home_room_id')} disabled={!row}>
+            <select value={form.home_room_id} onChange={set('home_room_id')}
+              disabled={!creating && !row}>
               <option value="">—</option>
               {rooms.map((r) => (
                 <option key={r.id} value={r.id}>{r.code}{r.capacity ? ` (cap ${r.capacity})` : ''}</option>
@@ -76,8 +92,8 @@ export default function BatchModal({ batchId, programId, onClose, onSaved }) {
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
           <span style={{ flex: 1 }} />
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn" onClick={save} disabled={busy || !row}>
-            {busy ? 'Saving…' : 'Save'}
+          <button className="btn" onClick={save} disabled={busy || (!creating && !row)}>
+            {busy ? 'Saving…' : creating ? 'Create batch' : 'Save'}
           </button>
         </div>
       </div>

@@ -541,10 +541,16 @@ export default function Timetable() {
           onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
           <div className="ctx-menu" style={{ top: menu.y, left: menu.x }} onClick={(e) => e.stopPropagation()}>
             {menu.batch ? (
-              <button className="ctx-item"
-                onClick={() => { setEditingBatch(menu.batch.id); setMenu(null); }}>
-                Edit batch…
-              </button>
+              <>
+                <button className="ctx-item"
+                  onClick={() => { setEditingBatch(menu.batch.id); setMenu(null); }}>
+                  Edit batch…
+                </button>
+                <button className="ctx-item"
+                  onClick={() => { setEditingBatch('new'); setMenu(null); }}>
+                  Add row (new batch)…
+                </button>
+              </>
             ) : (
               <>
                 <button className="ctx-item"
@@ -597,10 +603,16 @@ export default function Timetable() {
 
       {editingBatch && (
         <BatchModal
-          batchId={editingBatch}
+          batchId={editingBatch === 'new' ? null : editingBatch}
           programId={programId}
           onClose={() => setEditingBatch(null)}
-          onSaved={() => { setEditingBatch(null); reload(); }}
+          onSaved={(newId) => {
+            setEditingBatch(null);
+            reload();
+            // A brand-new batch has no sessions yet, so the grid has no row to
+            // show — chain straight into "Add session" for it to create one.
+            if (newId) setEditing({ programId, date, batch_id: newId });
+          }}
         />
       )}
 
