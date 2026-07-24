@@ -70,6 +70,7 @@ CREATE TABLE batches (
   home_room_id  INT,
   exam_month    VARCHAR(40),
   active        TINYINT(1) NOT NULL DEFAULT 1,
+  sort_order    INT NOT NULL DEFAULT 0,     -- timetable row order within the program (0 = fall back to id)
   FOREIGN KEY (program_id)   REFERENCES programs(id),
   FOREIGN KEY (home_room_id) REFERENCES classrooms(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

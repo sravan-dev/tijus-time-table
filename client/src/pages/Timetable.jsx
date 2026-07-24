@@ -25,7 +25,9 @@ export default function Timetable() {
   const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation } or { x, y, batch }
   const [reassigning, setReassigning] = useState(null); // allocation being reassigned
   const [addingFaculty, setAddingFaculty] = useState(null); // allocation getting a co-teacher
-  const [editingBatch, setEditingBatch] = useState(null); // batch id being edited (right-click)
+  // Right-click batch edit/create: { batchId } to edit, { placement } to insert
+  // a new row above/below an existing one, {} to append at the end.
+  const [editingBatch, setEditingBatch] = useState(null);
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -543,12 +545,26 @@ export default function Timetable() {
             {menu.batch ? (
               <>
                 <button className="ctx-item"
-                  onClick={() => { setEditingBatch(menu.batch.id); setMenu(null); }}>
+                  onClick={() => { setEditingBatch({ batchId: menu.batch.id }); setMenu(null); }}>
                   Edit batch…
                 </button>
                 <button className="ctx-item"
-                  onClick={() => { setEditingBatch('new'); setMenu(null); }}>
-                  Add row (new batch)…
+                  onClick={() => {
+                    setEditingBatch({ placement: { position: 'above', relative_to: menu.batch.id } });
+                    setMenu(null);
+                  }}>
+                  Add row above (new batch)…
+                </button>
+                <button className="ctx-item"
+                  onClick={() => {
+                    setEditingBatch({ placement: { position: 'below', relative_to: menu.batch.id } });
+                    setMenu(null);
+                  }}>
+                  Add row below (new batch)…
+                </button>
+                <button className="ctx-item"
+                  onClick={() => { setEditingBatch({}); setMenu(null); }}>
+                  Add row at end (new batch)…
                 </button>
               </>
             ) : (
@@ -603,7 +619,8 @@ export default function Timetable() {
 
       {editingBatch && (
         <BatchModal
-          batchId={editingBatch === 'new' ? null : editingBatch}
+          batchId={editingBatch.batchId || null}
+          placement={editingBatch.placement || null}
           programId={programId}
           onClose={() => setEditingBatch(null)}
           onSaved={(newId) => {

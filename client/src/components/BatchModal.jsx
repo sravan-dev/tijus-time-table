@@ -6,7 +6,9 @@ import api from '../api/client';
 // replaces every column, so the full row is loaded first and unedited fields
 // (program, exam month, active) are sent back as-is. On create, onSaved
 // receives the new batch id so the caller can chain into "Add session".
-export default function BatchModal({ batchId, programId, onClose, onSaved }) {
+// `placement` ({ position: 'above'|'below', relative_to }) puts the new
+// batch's grid row next to an existing one instead of at the end.
+export default function BatchModal({ batchId, placement, programId, onClose, onSaved }) {
   const creating = !batchId;
   const [row, setRow] = useState(null);
   const [rooms, setRooms] = useState([]);
@@ -45,6 +47,7 @@ export default function BatchModal({ batchId, programId, onClose, onSaved }) {
           program_id: programId,
           student_count: Number(form.student_count) || 0,
           home_room_id: form.home_room_id || null,
+          ...(placement || {}),
         });
         onSaved(data.id);
       } else {

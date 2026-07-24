@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
   // the grid; pending ones show through, badged, so admins can judge in context.
   let sql = SELECT + " WHERE a.alloc_date = ? AND a.status <> 'rejected'";
   if (program_id) { sql += ' AND a.program_id = ?'; params.push(program_id); }
-  sql += ' ORDER BY p.code, a.batch_id, ts.sort_order';
+  sql += ' ORDER BY p.code, b.sort_order, a.batch_id, ts.sort_order';
   const [rows] = await pool.query(sql, params);
   const conflicts = await conflictsForDate(date);
   res.json({ allocations: rows, conflicts });

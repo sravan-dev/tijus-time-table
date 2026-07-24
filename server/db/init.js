@@ -35,6 +35,19 @@ export async function initDb() {
     try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS faculty_id INT NULL'); } catch { /* exists */ }
     try { await pool.query('ALTER TABLE faculty ADD COLUMN IF NOT EXISTS email VARCHAR(160) NULL'); } catch { /* exists */ }
 
+    // batches.sort_order drives the timetable row order (right-click →
+    // "Add row above/below"). information_schema check because MySQL 8 has no
+    // ADD COLUMN IF NOT EXISTS; backfill = id preserves the historical order.
+    const [[soHit]] = await pool.query(
+      `SELECT COUNT(*) AS n FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name = 'batches' AND column_name = 'sort_order'`
+    );
+    if (!soHit.n) {
+      await pool.query('ALTER TABLE batches ADD COLUMN sort_order INT NOT NULL DEFAULT 0');
+      await pool.query('UPDATE batches SET sort_order = id WHERE sort_order = 0');
+      console.log('[init] Added batches.sort_order (backfilled from id)');
+    }
+
     // Support tickets (tutors raise, admins reply) — added in a later release, so
     // create them here for databases provisioned before the feature existed.
     await pool.query(
