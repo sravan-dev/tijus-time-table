@@ -33,6 +33,9 @@ export default function Timetable() {
   const [clearing, setClearing] = useState(false);
   const dragRef = useRef(null);           // allocation being dragged
   const [dragOver, setDragOver] = useState(null); // cellKey of the current drop target
+  const rowDragRef = useRef(null);        // batch id of the row being dragged
+  // Row drop indicator: { id, pos: 'above'|'below' } for the hovered row.
+  const [rowDragOver, setRowDragOver] = useState(null);
   const [moving, setMoving] = useState(false);
   // A drop awaiting confirmation: { src, batch:{id,name}, slot:{id,label}, target }.
   // The move is only applied once the admin clicks Apply in the modal.
@@ -271,6 +274,31 @@ export default function Timetable() {
     }
   }
 
+  // Drag a batch row above/below another row: rebuild the full order of the
+  // grid's batches and persist it in one call. Uses the unfiltered `batches`
+  // list so a faculty-filtered view still reorders against the real grid.
+  async function moveRow(srcId, targetId, pos) {
+    if (moving || srcId === targetId) return;
+    const ids = batches.map((b) => b.id).filter(Boolean);
+    const from = ids.indexOf(srcId);
+    if (from === -1) return;
+    ids.splice(from, 1);
+    let at = ids.indexOf(targetId);
+    if (at === -1) return;
+    if (pos === 'below') at += 1;
+    ids.splice(at, 0, srcId);
+    setMoving(true);
+    try {
+      await api.put('/batches/reorder', { program_id: programId, order: ids });
+      await reload();
+      toast('Row moved');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not move the row', 'error');
+    } finally {
+      setMoving(false);
+    }
+  }
+
   // Undo the most recent drag move (restore the "from" positions).
   async function undoMove() {
     if (moving || !undoStack.length) return;
@@ -386,9 +414,37 @@ export default function Timetable() {
           </thead>
           <tbody>
             {visibleBatches.map((b) => (
-              <tr key={b.id ?? b.name}>
+              <tr key={b.id ?? b.name}
+                className={rowDragOver?.id === b.id ? 'row-drag-' + rowDragOver.pos : undefined}
+                onDragOver={(e) => {
+                  // Only react to a row drag (rowDragRef), never a session drag.
+                  if (!canEdit || !rowDragRef.current || !b.id) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const pos = e.clientY < r.top + r.height / 2 ? 'above' : 'below';
+                  setRowDragOver((cur) =>
+                    cur?.id === b.id && cur.pos === pos ? cur : { id: b.id, pos });
+                }}
+                onDrop={(e) => {
+                  if (!canEdit || !rowDragRef.current) return;
+                  e.preventDefault();
+                  const src = rowDragRef.current;
+                  const over = rowDragOver;
+                  rowDragRef.current = null;
+                  setRowDragOver(null);
+                  if (b.id && src !== b.id) moveRow(src, b.id, over?.pos || 'above');
+                }}>
                 <td className="batch"
-                  title={canEdit && b.id ? 'Right-click to edit this batch' : undefined}
+                  draggable={Boolean(canEdit && b.id)}
+                  title={canEdit && b.id
+                    ? 'Drag to reorder rows · Right-click to edit this batch' : undefined}
+                  onDragStart={(e) => {
+                    if (!canEdit || !b.id) return;
+                    rowDragRef.current = b.id;
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragEnd={() => { rowDragRef.current = null; setRowDragOver(null); }}
                   onContextMenu={(e) => {
                     if (!canEdit || !b.id) return; // batch-less rows have nothing to edit
                     e.preventDefault();

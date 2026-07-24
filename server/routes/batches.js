@@ -70,6 +70,33 @@ router.post('/', requireEditor, async (req, res) => {
   }
 });
 
+// Persist a full row order for a program's grid: { program_id, order: [batch ids] }.
+// sort_order becomes the array index, so a drag-and-drop reorder on the client
+// sends the whole visible order in one call. Must be registered before /:id.
+router.put('/reorder', requireEditor, async (req, res) => {
+  const { program_id, order } = req.body;
+  if (!program_id || !Array.isArray(order) || !order.length)
+    return res.status(400).json({ error: 'program_id and order are required' });
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (let i = 0; i < order.length; i++) {
+      await conn.query(
+        'UPDATE batches SET sort_order = ? WHERE id = ? AND program_id = ?',
+        [i + 1, order[i], program_id]
+      );
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    await conn.rollback();
+    console.error(e);
+    res.status(500).json({ error: e.message || 'Could not reorder the batches' });
+  } finally {
+    conn.release();
+  }
+});
+
 router.put('/:id', requireEditor, async (req, res) => {
   const { name, program_id, student_count, home_room_id, exam_month, active } = req.body;
   await pool.query(

@@ -160,11 +160,17 @@ table.tt td.batch, table.tt th.batch {
 .cell[draggable="true"] { cursor: grab; }
 .cell[draggable="true"]:active { cursor: grabbing; }
 .cell.drag-over { outline: 2px dashed var(--brand); background: var(--brand-tint); }
+/* drag a batch cell to reorder its whole row */
+table.tt td.batch[draggable="true"] { cursor: grab; }
+table.tt td.batch[draggable="true"]:active { cursor: grabbing; }
+table.tt tr.row-drag-above td { border-top: 3px solid var(--brand); }
+table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
 /* a tutor's session request, not yet approved by an admin */
 .cell.pending { opacity: .65; outline: 1px dashed var(--warn); }
 .cell .badge.pending { background: var(--warn); }
 @media print {
   .cell[draggable="true"] { cursor: default; }
+  table.tt td.batch[draggable="true"] { cursor: default; }
   .cell.pending { display: none; }   /* never print an unapproved session */
 }
 
