@@ -274,6 +274,22 @@ export default function Timetable() {
     }
   }
 
+  // Delete a batch row: removes the batch and its sessions on EVERY date,
+  // not just the day on screen.
+  async function deleteBatch(b) {
+    if (!confirm(`Delete the batch "${b.name}" and ALL of its sessions on every date? ` +
+      'This cannot be undone.')) return;
+    try {
+      const { data: r } = await api.delete(`/batches/${b.id}`);
+      const { data: ds } = await api.get('/allocations/dates');
+      setDates(ds.map((d) => d.slice(0, 10)));
+      await reload();
+      toast(`Batch deleted (${r.deleted_sessions} session(s) removed)`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not delete the batch', 'error');
+    }
+  }
+
   // Drag a batch row above/below another row: rebuild the full order of the
   // grid's batches and persist it in one call. Uses the unfiltered `batches`
   // list so a faculty-filtered view still reorders against the real grid.
@@ -621,6 +637,10 @@ export default function Timetable() {
                 <button className="ctx-item"
                   onClick={() => { setEditingBatch({}); setMenu(null); }}>
                   Add row at end (new batch)…
+                </button>
+                <button className="ctx-item danger"
+                  onClick={() => { const b = menu.batch; setMenu(null); deleteBatch(b); }}>
+                  Delete row (batch)…
                 </button>
               </>
             ) : (

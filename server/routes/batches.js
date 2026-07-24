@@ -107,9 +107,23 @@ router.put('/:id', requireEditor, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Deleting a batch also deletes its sessions on every date; the FK is
+// ON DELETE SET NULL, which would otherwise leave orphaned "—" rows behind.
 router.delete('/:id', requireEditor, async (req, res) => {
-  await pool.query('DELETE FROM batches WHERE id = ?', [req.params.id]);
-  res.json({ ok: true });
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [s] = await conn.query('DELETE FROM allocations WHERE batch_id = ?', [req.params.id]);
+    await conn.query('DELETE FROM batches WHERE id = ?', [req.params.id]);
+    await conn.commit();
+    res.json({ ok: true, deleted_sessions: s.affectedRows });
+  } catch (e) {
+    await conn.rollback();
+    console.error(e);
+    res.status(500).json({ error: e.message || 'Could not delete the batch' });
+  } finally {
+    conn.release();
+  }
 });
 
 export default router;
