@@ -109,18 +109,66 @@ router.put('/:id', requireEditor, async (req, res) => {
 
 // Deleting a batch also deletes its sessions on every date; the FK is
 // ON DELETE SET NULL, which would otherwise leave orphaned "—" rows behind.
+// The deleted batch and session rows are returned so the client can offer
+// an undo (see POST /restore below).
 router.delete('/:id', requireEditor, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [s] = await conn.query('DELETE FROM allocations WHERE batch_id = ?', [req.params.id]);
+    const [[batch]] = await conn.query('SELECT * FROM batches WHERE id = ?', [req.params.id]);
+    if (!batch) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Batch not found' });
+    }
+    const [allocations] = await conn.query(
+      'SELECT * FROM allocations WHERE batch_id = ?', [req.params.id]
+    );
+    await conn.query('DELETE FROM allocations WHERE batch_id = ?', [req.params.id]);
     await conn.query('DELETE FROM batches WHERE id = ?', [req.params.id]);
     await conn.commit();
-    res.json({ ok: true, deleted_sessions: s.affectedRows });
+    res.json({ ok: true, deleted_sessions: allocations.length, batch, allocations });
   } catch (e) {
     await conn.rollback();
     console.error(e);
     res.status(500).json({ error: e.message || 'Could not delete the batch' });
+  } finally {
+    conn.release();
+  }
+});
+
+// Undo a batch delete: reinsert the batch and its sessions with their
+// original ids, exactly as DELETE /:id returned them.
+router.post('/restore', requireEditor, async (req, res) => {
+  const { batch, allocations = [] } = req.body || {};
+  if (!batch?.id || !batch?.name || !batch?.program_id)
+    return res.status(400).json({ error: 'batch data is required' });
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      `INSERT INTO batches (id, name, program_id, student_count, home_room_id, exam_month, active, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [batch.id, batch.name, batch.program_id, batch.student_count ?? 0,
+        batch.home_room_id ?? null, batch.exam_month ?? null, batch.active ?? 1,
+        batch.sort_order ?? 0]
+    );
+    for (const a of allocations) {
+      await conn.query(
+        `INSERT INTO allocations (id, alloc_date, program_id, batch_id, activity_id, time_slot_id,
+           classroom_id, faculty_id, student_count, raw_text, note, status,
+           requested_by, decided_by, decided_at, decision_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [a.id, a.alloc_date, a.program_id, a.batch_id, a.activity_id, a.time_slot_id,
+          a.classroom_id, a.faculty_id, a.student_count, a.raw_text, a.note,
+          a.status ?? 'approved', a.requested_by, a.decided_by, a.decided_at, a.decision_note]
+      );
+    }
+    await conn.commit();
+    res.json({ ok: true, restored_sessions: allocations.length });
+  } catch (e) {
+    await conn.rollback();
+    console.error(e);
+    res.status(500).json({ error: e.message || 'Could not restore the batch' });
   } finally {
     conn.release();
   }

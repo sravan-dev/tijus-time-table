@@ -40,8 +40,10 @@ export default function Timetable() {
   // A drop awaiting confirmation: { src, batch:{id,name}, slot:{id,label}, target }.
   // The move is only applied once the admin clicks Apply in the modal.
   const [pendingMove, setPendingMove] = useState(null);
-  // Undo/redo history for drag moves. Each entry is a list of position changes:
-  // { id, from:{batch_id,time_slot_id}, to:{batch_id,time_slot_id} }.
+  // Undo/redo history (Ctrl+Z / Ctrl+Y). Typed entries:
+  //  { type:'cells', ops:[{ id, from:{batch_id,time_slot_id}, to:{...} }] } — session drag/swap
+  //  { type:'order', program_id, from:[batch ids], to:[batch ids] }        — row reorder
+  //  { type:'batch-delete', batch, allocations }                           — batch delete
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
 
@@ -263,7 +265,7 @@ export default function Timetable() {
     try {
       await applyPositions(ops.map((o) => ({ id: o.id, ...o.to })));
       await reload();
-      setUndoStack((s) => [...s, ops]);
+      setUndoStack((s) => [...s, { type: 'cells', ops }]);
       setRedoStack([]);                          // a fresh move invalidates redo
       toast(target ? 'Sessions swapped' : 'Session moved');
     } catch (e) {
@@ -274,17 +276,26 @@ export default function Timetable() {
     }
   }
 
+  // Refresh the date dropdown (days can appear/vanish when sessions are
+  // deleted or restored in bulk).
+  async function refreshDates() {
+    const { data: ds } = await api.get('/allocations/dates');
+    setDates(ds.map((d) => d.slice(0, 10)));
+  }
+
   // Delete a batch row: removes the batch and its sessions on EVERY date,
-  // not just the day on screen.
+  // not just the day on screen. Undoable with Ctrl+Z — the server returns
+  // the deleted rows and /batches/restore reinserts them.
   async function deleteBatch(b) {
     if (!confirm(`Delete the batch "${b.name}" and ALL of its sessions on every date? ` +
-      'This cannot be undone.')) return;
+      'You can undo this with Ctrl+Z until you leave this view.')) return;
     try {
       const { data: r } = await api.delete(`/batches/${b.id}`);
-      const { data: ds } = await api.get('/allocations/dates');
-      setDates(ds.map((d) => d.slice(0, 10)));
+      await refreshDates();
       await reload();
-      toast(`Batch deleted (${r.deleted_sessions} session(s) removed)`);
+      setUndoStack((s) => [...s, { type: 'batch-delete', batch: r.batch, allocations: r.allocations }]);
+      setRedoStack([]);
+      toast(`Batch deleted (${r.deleted_sessions} session(s) removed) — Ctrl+Z to undo`);
     } catch (e) {
       toast(e.response?.data?.error || 'Could not delete the batch', 'error');
     }
@@ -295,7 +306,8 @@ export default function Timetable() {
   // list so a faculty-filtered view still reorders against the real grid.
   async function moveRow(srcId, targetId, pos) {
     if (moving || srcId === targetId) return;
-    const ids = batches.map((b) => b.id).filter(Boolean);
+    const prevIds = batches.map((b) => b.id).filter(Boolean);
+    const ids = [...prevIds];
     const from = ids.indexOf(srcId);
     if (from === -1) return;
     ids.splice(from, 1);
@@ -307,6 +319,8 @@ export default function Timetable() {
     try {
       await api.put('/batches/reorder', { program_id: programId, order: ids });
       await reload();
+      setUndoStack((s) => [...s, { type: 'order', program_id: programId, from: prevIds, to: ids }]);
+      setRedoStack([]);
       toast('Row moved');
     } catch (e) {
       toast(e.response?.data?.error || 'Could not move the row', 'error');
@@ -315,17 +329,46 @@ export default function Timetable() {
     }
   }
 
-  // Undo the most recent drag move (restore the "from" positions).
+  // Apply one history entry in the given direction ('undo' | 'redo').
+  async function applyEntry(entry, dir) {
+    if (entry.type === 'cells') {
+      const key = dir === 'undo' ? 'from' : 'to';
+      await applyPositions(entry.ops.map((o) => ({ id: o.id, ...o[key] })));
+    } else if (entry.type === 'order') {
+      await api.put('/batches/reorder', {
+        program_id: entry.program_id,
+        order: dir === 'undo' ? entry.from : entry.to,
+      });
+    } else if (entry.type === 'batch-delete') {
+      if (dir === 'undo') {
+        await api.post('/batches/restore', {
+          batch: entry.batch, allocations: entry.allocations,
+        });
+      } else {
+        await api.delete(`/batches/${entry.batch.id}`);
+      }
+      await refreshDates();
+    }
+  }
+
+  function entryToast(entry, dir) {
+    if (entry.type === 'order') return dir === 'undo' ? 'Row order undone' : 'Row order redone';
+    if (entry.type === 'batch-delete')
+      return dir === 'undo' ? 'Batch restored' : 'Batch deleted again';
+    return dir === 'undo' ? 'Move undone' : 'Move redone';
+  }
+
+  // Undo the most recent grid change (Ctrl+Z).
   async function undoMove() {
     if (moving || !undoStack.length) return;
-    const ops = undoStack[undoStack.length - 1];
+    const entry = undoStack[undoStack.length - 1];
     setMoving(true);
     try {
-      await applyPositions(ops.map((o) => ({ id: o.id, ...o.from })));
+      await applyEntry(entry, 'undo');
       await reload();
       setUndoStack((s) => s.slice(0, -1));
-      setRedoStack((s) => [...s, ops]);
-      toast('Move undone');
+      setRedoStack((s) => [...s, entry]);
+      toast(entryToast(entry, 'undo'));
     } catch (e) {
       toast(e.response?.data?.error || 'Could not undo', 'error');
       await reload();
@@ -334,17 +377,17 @@ export default function Timetable() {
     }
   }
 
-  // Redo the last undone drag move (re-apply the "to" positions).
+  // Redo the last undone change (Ctrl+Y / Ctrl+Shift+Z).
   async function redoMove() {
     if (moving || !redoStack.length) return;
-    const ops = redoStack[redoStack.length - 1];
+    const entry = redoStack[redoStack.length - 1];
     setMoving(true);
     try {
-      await applyPositions(ops.map((o) => ({ id: o.id, ...o.to })));
+      await applyEntry(entry, 'redo');
       await reload();
       setRedoStack((s) => s.slice(0, -1));
-      setUndoStack((s) => [...s, ops]);
-      toast('Move redone');
+      setUndoStack((s) => [...s, entry]);
+      toast(entryToast(entry, 'redo'));
     } catch (e) {
       toast(e.response?.data?.error || 'Could not redo', 'error');
       await reload();
@@ -389,10 +432,10 @@ export default function Timetable() {
           <>
             <button className="btn ghost" onClick={undoMove}
               disabled={moving || !undoStack.length}
-              title="Undo the last drag move (Ctrl+Z)">↶ Undo</button>
+              title="Undo the last grid change (Ctrl+Z)">↶ Undo</button>
             <button className="btn ghost" onClick={redoMove}
               disabled={moving || !redoStack.length}
-              title="Redo the last undone move (Ctrl+Y)">↷ Redo</button>
+              title="Redo the last undone change (Ctrl+Y)">↷ Redo</button>
           </>
         )}
         {canEdit && data.allocations.length > 0 && (
