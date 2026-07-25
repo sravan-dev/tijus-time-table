@@ -17,6 +17,7 @@ export default function ReassignModal({ allocation, programId, date, mode = 'rea
   const [facultyId, setFacultyId] = useState(adding ? '' : allocation.faculty_id ?? '');
   // add mode picks any number of tutors at once (one session created per tutor)
   const [pickedIds, setPickedIds] = useState([]);
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -66,6 +67,14 @@ export default function ReassignModal({ allocation, programId, date, mode = 'rea
     const score = (f) => (((!capableIds || capableIds.has(f.id)) ? 2 : 0) + (!busyIds.has(f.id) ? 1 : 0));
     return [...faculty].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
   }, [faculty, busyIds, capableIds]);
+
+  // search filters the list, but anyone already ticked stays visible so a
+  // narrow query can't hide (or silently drop) an existing pick.
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((f) => f.name.toLowerCase().includes(q) || pickedIds.includes(f.id));
+  }, [options, query, pickedIds]);
 
   function toggle(id) {
     setPickedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -137,8 +146,17 @@ export default function ReassignModal({ allocation, programId, date, mode = 'rea
           </label>
 
           {adding ? (
+            <>
+            <input
+              className="pick-search"
+              type="search"
+              placeholder="Search faculty…"
+              value={query}
+              autoFocus
+              onChange={(e) => setQuery(e.target.value)}
+            />
             <div className="pick-list">
-              {options.map((f) => {
+              {shown.map((f) => {
                 const free = !busyIds.has(f.id);
                 const capable = capableIds && capableIds.has(f.id); // only when data is available
                 const tags = [capable ? '✓ capable' : null, free ? null : '• busy this slot'].filter(Boolean);
@@ -154,8 +172,13 @@ export default function ReassignModal({ allocation, programId, date, mode = 'rea
                   </label>
                 );
               })}
-              {options.length === 0 && <div className="sub" style={{ padding: 8 }}>No faculty found.</div>}
+              {shown.length === 0 && (
+                <div className="sub" style={{ padding: 8 }}>
+                  {query ? `No faculty matching “${query}”.` : 'No faculty found.'}
+                </div>
+              )}
             </div>
+            </>
           ) : (
             <select value={facultyId} onChange={(e) => setFacultyId(e.target.value)}>
               <option value="">— unassigned —</option>

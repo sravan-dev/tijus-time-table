@@ -240,6 +240,7 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
   max-height: 240px; overflow-y: auto;
   border: 1px solid var(--line); border-radius: 8px; padding: 4px;
 }
+.pick-search { margin-bottom: 6px; }
 /* label.pick-row so it outranks the muted `.field label` rule above */
 label.pick-row {
   display: flex; align-items: center; gap: 8px;
