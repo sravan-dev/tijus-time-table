@@ -235,6 +235,22 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
 .field { margin-bottom: 12px; display:flex; flex-direction:column; gap:4px; }
 .field label { font-size: 12px; color: var(--muted); font-weight:600; }
 
+/* multi-select checkbox list (e.g. adding several additional faculty at once) */
+.pick-list {
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px;
+}
+/* label.pick-row so it outranks the muted `.field label` rule above */
+label.pick-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 400; color: var(--ink);
+}
+label.pick-row:hover { background: var(--brand-tint); }
+label.pick-row.on { background: var(--brand-tint); font-weight: 600; }
+.pick-row input[type="checkbox"] { width: auto; margin: 0; flex: none; }
+.pick-row .sub { font-size: 12px; color: var(--muted); font-weight: 400; }
+
 /* ---- Login ---- */
 .login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding: 16px; }
 .login-card { width: 340px; max-width: 100%; }
