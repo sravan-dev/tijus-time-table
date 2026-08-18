@@ -71,6 +71,18 @@ export default function ActivityModal({ target, programId, date, onClose, onSave
     setTouched(false);
   }
 
+  // Chosen from the full list. Its code is what the cell prints, so that is
+  // what goes in the name box. Types with no colours of their own leave the
+  // current highlight alone rather than resetting it.
+  function pickExisting(act) {
+    setName(act.code);
+    if (act.text_color || act.bg_color) {
+      if (act.text_color) setText(act.text_color);
+      if (act.bg_color) setBg(act.bg_color);
+      setTouched(false);
+    }
+  }
+
   async function save() {
     if (!name.trim()) { setErr('Pick or type an activity name'); return; }
     setBusy(true); setErr('');
@@ -139,12 +151,19 @@ export default function ActivityModal({ target, programId, date, onClose, onSave
               </button>
             ))}
           </div>
-          <input type="text" list="activity-names" value={name}
-            placeholder="…or type another activity"
+          <select value={known?.id ?? ''}
+            onChange={(e) => {
+              const act = activities.find((x) => String(x.id) === e.target.value);
+              if (act) pickExisting(act);
+            }}>
+            <option value="">…or pick from all activities</option>
+            {activities.map((x) => (
+              <option key={x.id} value={x.id}>{x.code} · {x.name}</option>
+            ))}
+          </select>
+          <input type="text" value={name}
+            placeholder="…or type a new activity"
             onChange={(e) => setName(e.target.value)} />
-          <datalist id="activity-names">
-            {activities.map((a) => <option key={a.id} value={a.name || a.code} />)}
-          </datalist>
           <div className="sub" style={{ fontSize: 12 }}>
             {known
               ? `Uses the existing "${known.code}" type — that is what the cell prints.`
