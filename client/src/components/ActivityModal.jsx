@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
+import ColourPicker from './ColourPicker';
 
 // The activity types this modal offers up front. Their colours match the seeds
 // in server/db/migrate-activity-colors.js, and the server reuses an existing
@@ -14,14 +15,6 @@ const PRESETS = [
   { name: 'Mentors Meeting', text: '#334155', bg: '#e2e8f0' },
 ];
 
-// Ready-made text/background pairs, so an admin never has to think about
-// contrast when a custom activity needs a colour.
-const SWATCHES = [
-  ['#5b21b6', '#ede9fe'], ['#075985', '#e0f2fe'], ['#991b1b', '#fee2e2'],
-  ['#92400e', '#fef3c7'], ['#166534', '#dcfce7'], ['#9d174d', '#fce7f3'],
-  ['#334155', '#e2e8f0'], ['#ffffff', '#303070'],
-];
-
 const norm = (s) => String(s || '').trim().toLowerCase();
 const codeOf = (s) => String(s || '').trim().toUpperCase().slice(0, 20);
 
@@ -32,8 +25,11 @@ const codeOf = (s) => String(s || '').trim().toUpperCase().slice(0, 20);
 export default function ActivityModal({ target, programId, date, onClose, onSaved }) {
   const isEdit = Boolean(target?.id);
   const [activities, setActivities] = useState([]);
+  // The code, not the name: it is what the cell prints and what the server
+  // matches on, so re-saving an existing session round-trips to the same
+  // activity instead of coining a new type from its long name.
   const [name, setName] = useState(
-    isEdit ? (target.activity_name || target.activity_code || '') : ''
+    isEdit ? (target.activity_code || target.activity_name || '') : ''
   );
   const [text, setText] = useState(
     isEdit ? (target.text_color || target.activity_text_color || '#334155') : '#334155'
@@ -160,27 +156,8 @@ export default function ActivityModal({ target, programId, date, onClose, onSave
 
         <div className="field">
           <label>Highlight</label>
-          <div className="chip-row">
-            {SWATCHES.map(([t, b]) => (
-              <button key={t + b} type="button"
-                className={'swatch' + (t === text && b === bg ? ' on' : '')}
-                style={{ color: t, background: b }}
-                title={`Font ${t} on ${b}`}
-                onClick={() => { setText(t); setBg(b); setTouched(true); }}>Aa</button>
-            ))}
-          </div>
-          <div className="row" style={{ gap: 14, marginTop: 8 }}>
-            <label className="color-pick">
-              <span>Font colour</span>
-              <input type="color" value={text}
-                onChange={(e) => { setText(e.target.value); setTouched(true); }} />
-            </label>
-            <label className="color-pick">
-              <span>Background</span>
-              <input type="color" value={bg}
-                onChange={(e) => { setBg(e.target.value); setTouched(true); }} />
-            </label>
-          </div>
+          <ColourPicker text={text} bg={bg}
+            onChange={({ text: t, bg: b }) => { setText(t); setBg(b); setTouched(true); }} />
         </div>
 
         <div className="field">

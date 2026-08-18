@@ -8,6 +8,7 @@ import SlotModal from '../components/SlotModal';
 import ReassignModal from '../components/ReassignModal';
 import BatchModal from '../components/BatchModal';
 import ActivityModal from '../components/ActivityModal';
+import SplitCellModal from '../components/SplitCellModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
@@ -29,6 +30,8 @@ export default function Timetable() {
   // Highlighted activity being added to a cell (or an existing one being
   // recoloured): a cell stub { batch_id, time_slot_id, … } or an allocation.
   const [activityCell, setActivityCell] = useState(null);
+  // Cell being split into another area (the hover "+" divider, or the menu).
+  const [splitting, setSplitting] = useState(null);
   // Right-click batch edit/create: { batchId } to edit, { placement } to insert
   // a new row above/below an existing one, {} to append at the end.
   const [editingBatch, setEditingBatch] = useState(null);
@@ -595,26 +598,33 @@ export default function Timetable() {
                             {a.faculty_name && <div className="fac">{a.faculty_name}</div>}
                             {a.room_code && <div className="room">{a.room_code}</div>}
                             {!a.activity_code && !a.faculty_name && (
-                              <div className="room">{a.raw_text}</div>
+                              <div className="room">{a.raw_text || a.note}</div>
                             )}
                             {extras.map((x) => {
                               const xc = data.conflicts[x.id];
                               const xl = xc?.some((c) => c.level === 'error') ? 'error'
                                 : xc?.length ? 'warn' : null;
+                              // A split area holds nothing yet: it is a colour
+                              // waiting for its activity, so clicking it goes
+                              // straight to the activity picker.
+                              const label = x.faculty_name || x.activity_code || x.raw_text || x.note;
                               return (
                                 <div key={x.id}
                                   className={'fac extra' + (highlight(x) ? ' tinted' : '')}
                                   style={highlight(x)}
                                   title={xc ? xc.map((c) => c.message).join('\n')
                                     : (canEdit
-                                      ? (highlight(x)
-                                        ? 'Activity — click to edit, right-click to remove'
-                                        : 'Additional faculty — click to edit')
+                                      ? (!label
+                                        ? 'Empty area — click to add an activity'
+                                        : (highlight(x)
+                                          ? 'Activity — click to edit, right-click to remove'
+                                          : 'Additional faculty — click to edit'))
                                       : undefined)}
                                   onClick={(e) => {
                                     if (!canEdit || moving) return;
                                     e.stopPropagation();
-                                    setEditing(x);
+                                    if (label) setEditing(x);
+                                    else setActivityCell(x);
                                   }}
                                   onContextMenu={(e) => {
                                     if (!canEdit) return;
@@ -625,7 +635,7 @@ export default function Timetable() {
                                     // menu still has to be able to add to it.
                                     setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef });
                                   }}>
-                                  + {x.faculty_name || x.activity_code || x.raw_text || 'session'}
+                                  {label ? `+ ${label}` : <span className="empty-area">+ activity</span>}
                                   {xl && <span className={'badge ' + xl}>!</span>}
                                   {x.status === 'pending' && (
                                     <span className="badge pending" title="Awaiting admin approval">⏳</span>
@@ -635,6 +645,16 @@ export default function Timetable() {
                             })}
                           </>
                         ) : null}
+                        {/* Hovering a filled cell reveals a divider with a "+":
+                            click it to split the cell into another area. */}
+                        {canEdit && a && cellRef && (
+                          <button type="button" className="split-add no-print"
+                            title="Split this cell — add another area"
+                            onClick={(e) => { e.stopPropagation(); setSplitting(cellRef); }}
+                            onContextMenu={(e) => e.stopPropagation()}>
+                            <span>+</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   );
@@ -735,18 +755,27 @@ export default function Timetable() {
                   </>
                 )}
                 {menu.cell && (
-                  <button className="ctx-item"
-                    onClick={() => { setActivityCell(menu.cell); setMenu(null); }}>
-                    Add activity…
-                  </button>
+                  <>
+                    <button className="ctx-item"
+                      onClick={() => { setActivityCell(menu.cell); setMenu(null); }}>
+                      Add activity…
+                    </button>
+                    {/* Same as the hover "+", for touch screens and for anyone
+                        who works from the menu. */}
+                    {menu.allocation && (
+                      <button className="ctx-item"
+                        onClick={() => { setSplitting(menu.cell); setMenu(null); }}>
+                        Split cell…
+                      </button>
+                    )}
+                  </>
                 )}
-                {/* Only offered on a cell that already carries a highlight —
-                    i.e. one this menu created — so an ordinary class session
-                    can't have its subject swapped by accident. */}
-                {menu.allocation && isHighlighted(menu.allocation) && (
+                {menu.allocation && (
                   <button className="ctx-item"
                     onClick={() => { setActivityCell(menu.allocation); setMenu(null); }}>
-                    Edit activity / colours…
+                    {isHighlighted(menu.allocation)
+                      ? 'Edit activity / colours…'
+                      : 'Colour this session…'}
                   </button>
                 )}
                 {menu.allocation && (
@@ -790,6 +819,16 @@ export default function Timetable() {
           date={date}
           onClose={() => setActivityCell(null)}
           onSaved={() => { setActivityCell(null); reload(); }}
+        />
+      )}
+
+      {splitting && (
+        <SplitCellModal
+          cell={splitting}
+          programId={programId}
+          date={date}
+          onClose={() => setSplitting(null)}
+          onSaved={() => { setSplitting(null); reload(); }}
         />
       )}
 

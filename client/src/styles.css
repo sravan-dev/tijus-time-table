@@ -147,7 +147,7 @@ table.tt thead th.slot-edit:hover { background: var(--brand); color: #fff; }
 table.tt td.batch, table.tt th.batch {
   background: var(--brand-tint-2); font-weight: 700; white-space: nowrap; position: sticky; left: 0; min-width: 150px;
 }
-.cell { cursor: pointer; border-radius: 4px; padding: 3px; min-height: 30px; }
+.cell { position: relative; cursor: pointer; border-radius: 4px; padding: 3px; min-height: 30px; }
 .cell:hover { outline: 2px solid var(--brand); }
 .cell .act { font-weight: 700; }
 .cell .fac { color: var(--brand-dark); }
@@ -165,12 +165,35 @@ table.tt td.batch[draggable="true"] { cursor: grab; }
 table.tt td.batch[draggable="true"]:active { cursor: grabbing; }
 table.tt tr.row-drag-above td { border-top: 3px solid var(--brand); }
 table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
+/* Split affordance: hovering a filled cell draws a dashed divider across its
+   foot with a "+" in the middle. Positioned absolutely so revealing it never
+   reflows the row. */
+.split-add {
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 15px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; border: none; background: none; cursor: pointer;
+  opacity: 0; transition: opacity .12s ease-out;
+}
+.cell:hover .split-add, .split-add:focus-visible { opacity: 1; }
+.split-add::before {
+  content: ''; position: absolute; left: 2px; right: 2px; top: 50%;
+  border-top: 1px dashed var(--brand);
+}
+.split-add span {
+  position: relative; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--brand); color: #fff;
+  font-size: 12px; font-weight: 700; line-height: 14px; text-align: center;
+}
+.split-add:hover span { background: var(--brand-dark); }
+/* a split area with nothing in it yet */
+.empty-area { opacity: .6; font-style: italic; }
+
 /* an activity added from the right-click menu, painted with its own colours:
    the whole cell takes the highlight, so the sub-lines follow the font colour
    instead of the default indigo/grey */
 .cell.tinted { padding: 4px 6px; }
 .cell.tinted .fac, .cell.tinted .room { color: inherit; opacity: .85; }
-.fac.extra.tinted { border-radius: 4px; padding: 3px 5px; border-top: none; }
+.fac.extra.tinted { border-radius: 4px; padding: 3px 5px; border-top: none; margin-top: 3px; }
 /* a tutor's session request, not yet approved by an admin */
 .cell.pending { opacity: .65; outline: 1px dashed var(--warn); }
 .cell .badge.pending { background: var(--warn); }
