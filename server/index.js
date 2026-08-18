@@ -20,6 +20,7 @@ import notificationRoutes from './routes/notifications.js';
 import settingsRoutes from './routes/settings.js';
 import ticketRoutes from './routes/tickets.js';
 import supportRoutes from './routes/support.js';
+import { guard, errorHandler } from './middleware/async.js';
 
 // Load server/.env regardless of the working directory (so it works whether
 // started from the repo root or the server folder). On hosts that inject env
@@ -38,20 +39,22 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-app.use('/api/auth', authRoutes);
+// guard() keeps a rejected async handler from killing the process; see
+// middleware/async.js.
+app.use('/api/auth', guard(authRoutes));
 // Mounted before referenceRoutes (which gates all of /api behind auth) so the
 // public branding endpoint /api/settings/public stays reachable without a token.
-app.use('/api/settings', settingsRoutes);
-app.use('/api', referenceRoutes);
-app.use('/api/batches', batchRoutes);
-app.use('/api/allocations', allocationRoutes);
-app.use('/api/schedule', scheduleRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/my', myRoutes);
-app.use('/api/approvals', approvalRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/tickets', ticketRoutes);
-app.use('/api/support', supportRoutes);
+app.use('/api/settings', guard(settingsRoutes));
+app.use('/api', guard(referenceRoutes));
+app.use('/api/batches', guard(batchRoutes));
+app.use('/api/allocations', guard(allocationRoutes));
+app.use('/api/schedule', guard(scheduleRoutes));
+app.use('/api/users', guard(userRoutes));
+app.use('/api/my', guard(myRoutes));
+app.use('/api/approvals', guard(approvalRoutes));
+app.use('/api/notifications', guard(notificationRoutes));
+app.use('/api/tickets', guard(ticketRoutes));
+app.use('/api/support', guard(supportRoutes));
 
 // Unmatched API routes return JSON (not the SPA fallback below).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
@@ -64,11 +67,11 @@ if (fs.existsSync(clientDist)) {
   console.log('📦 Serving client build from', clientDist);
 }
 
-// fallback error handler
-app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(500).json({ error: err.message || 'Server error' });
-});
+app.use(errorHandler);
+
+// Last resort: a rejection from outside a request (a stray background task)
+// is logged rather than allowed to end the process.
+process.on('unhandledRejection', (e) => console.error('[unhandled rejection]', e));
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {

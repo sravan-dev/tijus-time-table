@@ -620,7 +620,10 @@ export default function Timetable() {
                                     if (!canEdit) return;
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x });
+                                    // `cell` as well as the session itself: once a
+                                    // cell is full these lines cover it, and the
+                                    // menu still has to be able to add to it.
+                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef });
                                   }}>
                                   + {x.faculty_name || x.activity_code || x.raw_text || 'session'}
                                   {xl && <span className={'badge ' + xl}>!</span>}
