@@ -91,7 +91,10 @@ CREATE TABLE time_slots (
 CREATE TABLE activities (
   id        INT AUTO_INCREMENT PRIMARY KEY,
   code      VARCHAR(20) NOT NULL UNIQUE,
-  name      VARCHAR(80) NOT NULL
+  name      VARCHAR(80) NOT NULL,
+  -- default highlight colours for this type in the timetable grid
+  text_color VARCHAR(9) NULL,
+  bg_color   VARCHAR(9) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Which programs + modules (Listening/Reading/Speaking/Writing) a tutor can
@@ -148,6 +151,9 @@ CREATE TABLE allocations (
   student_count INT,
   raw_text      VARCHAR(255),               -- original cell text, for reference/debugging
   note          VARCHAR(255),
+  -- Per-cell highlight colours; NULL falls back to the activity's defaults.
+  text_color    VARCHAR(9) NULL,
+  bg_color      VARCHAR(9) NULL,
   -- Sessions proposed by a tutor start 'pending' and are excluded from conflict
   -- checks until an admin approves them; staff-created sessions are 'approved'.
   status        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'approved',

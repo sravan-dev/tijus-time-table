@@ -47,6 +47,42 @@ router.get('/activities', async (_req, res) => {
   res.json(rows);
 });
 
+// Accept only a #rrggbb literal — these values are written straight into a
+// style attribute in the grid, so nothing else may get through.
+const HEX = /^#[0-9a-f]{6}$/i;
+const colour = (v) => (typeof v === 'string' && HEX.test(v.trim()) ? v.trim().toLowerCase() : null);
+
+// Create an activity type, or return the existing one with the same code.
+// Used by the grid's "Add activity…" modal, where an admin types a name
+// ("Movie", "Mentors meeting") without caring whether it exists yet.
+router.post('/activities', requireEditor, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'An activity name is required' });
+  // `code` is what the grid cell prints, so it stays short and uppercase like
+  // the imported types (R, GRAMMAR, YOGA).
+  const code = String(req.body.code || name).trim().toUpperCase().slice(0, 20);
+  const text_color = colour(req.body.text_color);
+  const bg_color = colour(req.body.bg_color);
+
+  const [[existing]] = await pool.query('SELECT * FROM activities WHERE code = ?', [code]);
+  if (existing) {
+    // Reuse rather than fail on the unique code, and let the colours just
+    // picked become this type's default for next time.
+    const t = text_color ?? existing.text_color;
+    const b = bg_color ?? existing.bg_color;
+    if (t !== existing.text_color || b !== existing.bg_color) {
+      await pool.query('UPDATE activities SET text_color = ?, bg_color = ? WHERE id = ?',
+        [t, b, existing.id]);
+    }
+    return res.json({ ...existing, text_color: t, bg_color: b });
+  }
+  const [r] = await pool.query(
+    'INSERT INTO activities (code, name, text_color, bg_color) VALUES (?, ?, ?, ?)',
+    [code, name.slice(0, 80), text_color, bg_color]
+  );
+  res.json({ id: r.insertId, code, name: name.slice(0, 80), text_color, bg_color });
+});
+
 // ---- Faculty -------------------------------------------------------------
 router.get('/faculty', async (_req, res) => {
   const [rows] = await pool.query('SELECT * FROM faculty ORDER BY name');

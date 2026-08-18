@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from './pool.js';
 import { seedReference } from './seed-reference.js';
+import { migrateActivityColors } from './migrate-activity-colors.js';
 import { importDocx } from '../import/parse-docx.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -78,6 +79,11 @@ export async function initDb() {
     const [[seedFlag]] = await pool.query(
       "SELECT svalue FROM app_settings WHERE skey = 'seed_disabled'");
     const seedDisabled = seedFlag?.svalue === '1';
+
+    // Highlight colours for activities + individual grid cells (right-click →
+    // “Add activity…”). After a reset, columns only — no activity types.
+    try { await migrateActivityColors(pool, { seed: !seedDisabled }); }
+    catch (e) { console.error('[init] activity colours patch failed:', e.message); }
 
     // 3. Seed reference data (programs, rooms, faculty, batches, users, settings)
     //    only if not present.

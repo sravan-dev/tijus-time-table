@@ -7,6 +7,7 @@ import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
 import ReassignModal from '../components/ReassignModal';
 import BatchModal from '../components/BatchModal';
+import ActivityModal from '../components/ActivityModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
@@ -25,6 +26,9 @@ export default function Timetable() {
   const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation } or { x, y, batch }
   const [reassigning, setReassigning] = useState(null); // allocation being reassigned
   const [addingFaculty, setAddingFaculty] = useState(null); // allocation getting a co-teacher
+  // Highlighted activity being added to a cell (or an existing one being
+  // recoloured): a cell stub { batch_id, time_slot_id, … } or an allocation.
+  const [activityCell, setActivityCell] = useState(null);
   // Right-click batch edit/create: { batchId } to edit, { placement } to insert
   // a new row above/below an existing one, {} to append at the end.
   const [editingBatch, setEditingBatch] = useState(null);
@@ -518,12 +522,21 @@ export default function Timetable() {
                   const level = conf?.some((c) => c.level === 'error') ? 'error'
                     : conf?.length ? 'warn' : null;
                   const cellKey = (b.id ?? b.name) + ':' + s.id;
+                  // Where a new activity would land. Batch-less rows (German's
+                  // per-tutor rows) have no cell to add one to.
+                  const cellRef = b.id ? {
+                    batch_id: b.id, batch_name: b.name,
+                    time_slot_id: s.id, slot_label: s.label,
+                    occupied: Boolean(a),
+                  } : null;
                   return (
                     <td key={s.id}>
                       <div
                         className={'cell' + (level ? ' conf-' + level : '')
                           + (dragOver === cellKey ? ' drag-over' : '')
-                          + (a?.status === 'pending' ? ' pending' : '')}
+                          + (a?.status === 'pending' ? ' pending' : '')
+                          + (highlight(a) ? ' tinted' : '')}
+                        style={highlight(a)}
                         title={a?.status === 'pending'
                           ? 'Requested by the tutor — awaiting approval'
                           : (conf ? conf.map((c) => c.message).join('\n') : '')}
@@ -562,9 +575,12 @@ export default function Timetable() {
                           a || { programId, date, batch_id: b.id, time_slot_id: s.id }
                         )}
                         onContextMenu={(e) => {
-                          if (!canEdit || !a) return; // only admins, only real sessions
+                          if (!canEdit) return;                 // admins only
+                          if (!a && !cellRef) return;           // nothing to act on
                           e.preventDefault();
-                          setMenu({ x: e.clientX, y: e.clientY, allocation: a });
+                          // An empty cell still gets a menu, so an activity can
+                          // be dropped straight into a free slot.
+                          setMenu({ x: e.clientX, y: e.clientY, allocation: a, cell: cellRef });
                         }}>
                         {a ? (
                           <>
@@ -585,7 +601,9 @@ export default function Timetable() {
                               const xl = xc?.some((c) => c.level === 'error') ? 'error'
                                 : xc?.length ? 'warn' : null;
                               return (
-                                <div key={x.id} className="fac extra"
+                                <div key={x.id}
+                                  className={'fac extra' + (highlight(x) ? ' tinted' : '')}
+                                  style={highlight(x)}
                                   title={xc ? xc.map((c) => c.message).join('\n')
                                     : (canEdit ? 'Additional faculty — click to edit' : undefined)}
                                   onClick={(e) => {
@@ -688,26 +706,47 @@ export default function Timetable() {
               </>
             ) : (
               <>
-                <button className="ctx-item"
-                  onClick={() => { setReassigning(menu.allocation); setMenu(null); }}>
-                  Reassign faculty…
-                </button>
-                <button className="ctx-item"
-                  onClick={() => { setAddingFaculty(menu.allocation); setMenu(null); }}>
-                  Add additional faculty…
-                </button>
-                <button className="ctx-item"
-                  onClick={() => {
-                    const a = menu.allocation;
-                    setEditing({ programId, date, batch_id: a.batch_id, time_slot_id: a.time_slot_id });
-                    setMenu(null);
-                  }}>
-                  Add additional session…
-                </button>
-                <button className="ctx-item danger"
-                  onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
-                  Clear session
-                </button>
+                {menu.allocation && (
+                  <>
+                    <button className="ctx-item"
+                      onClick={() => { setReassigning(menu.allocation); setMenu(null); }}>
+                      Reassign faculty…
+                    </button>
+                    <button className="ctx-item"
+                      onClick={() => { setAddingFaculty(menu.allocation); setMenu(null); }}>
+                      Add additional faculty…
+                    </button>
+                    <button className="ctx-item"
+                      onClick={() => {
+                        const a = menu.allocation;
+                        setEditing({ programId, date, batch_id: a.batch_id, time_slot_id: a.time_slot_id });
+                        setMenu(null);
+                      }}>
+                      Add additional session…
+                    </button>
+                  </>
+                )}
+                {menu.cell && (
+                  <button className="ctx-item"
+                    onClick={() => { setActivityCell(menu.cell); setMenu(null); }}>
+                    Add activity…
+                  </button>
+                )}
+                {/* Only offered on a cell that already carries a highlight —
+                    i.e. one this menu created — so an ordinary class session
+                    can't have its subject swapped by accident. */}
+                {menu.allocation && isHighlighted(menu.allocation) && (
+                  <button className="ctx-item"
+                    onClick={() => { setActivityCell(menu.allocation); setMenu(null); }}>
+                    Edit activity / colours…
+                  </button>
+                )}
+                {menu.allocation && (
+                  <button className="ctx-item danger"
+                    onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
+                    Clear session
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -733,6 +772,16 @@ export default function Timetable() {
           dayAllocations={data.allocations}
           onClose={() => setAddingFaculty(null)}
           onSaved={() => { setAddingFaculty(null); reload(); }}
+        />
+      )}
+
+      {activityCell && (
+        <ActivityModal
+          target={activityCell}
+          programId={programId}
+          date={date}
+          onClose={() => setActivityCell(null)}
+          onSaved={() => { setActivityCell(null); reload(); }}
         />
       )}
 
@@ -782,6 +831,23 @@ export default function Timetable() {
     </div>
   );
 }
+
+// The highlight colours of a session. Only the colours stored on the session
+// itself paint the grid — the activity type's colours are just the default the
+// "Add activity" modal offers — so recolouring a type never repaints days that
+// are already published, and untouched sessions keep the plain grid look.
+function highlight(a) {
+  if (!a) return undefined;
+  const color = a.text_color;
+  const background = a.bg_color;
+  if (!color && !background) return undefined;
+  const style = {};
+  if (color) style.color = color;
+  if (background) style.background = background;
+  return style;
+}
+
+const isHighlighted = (a) => Boolean(highlight(a));
 
 // A short human label for a session cell: activity / faculty / room, falling
 // back to the raw imported text.

@@ -12,6 +12,7 @@ const SELECT = `
   SELECT a.*, p.code AS program_code,
          b.name AS batch_name, b.student_count,
          ac.code AS activity_code, ac.name AS activity_name,
+         ac.text_color AS activity_text_color, ac.bg_color AS activity_bg_color,
          ts.label AS slot_label, ts.sort_order AS slot_order,
          r.code AS room_code, r.capacity AS room_capacity,
          f.name AS faculty_name
@@ -133,9 +134,11 @@ router.post('/generate', requireEditor, async (req, res) => {
 
   const [r] = await pool.query(
     `INSERT INTO allocations (alloc_date, program_id, batch_id, activity_id, time_slot_id,
-                              classroom_id, faculty_id, student_count, raw_text, note)
+                              classroom_id, faculty_id, student_count, raw_text, note,
+                              text_color, bg_color)
      SELECT ?, program_id, batch_id, activity_id, time_slot_id,
-            classroom_id, faculty_id, student_count, raw_text, note
+            classroom_id, faculty_id, student_count, raw_text, note,
+            text_color, bg_color
        FROM allocations WHERE alloc_date = ?${progFilter}`,
     [date, source, ...progParams]
   );
@@ -143,7 +146,18 @@ router.post('/generate', requireEditor, async (req, res) => {
 });
 
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
-  'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'note'];
+  'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'note',
+  'text_color', 'bg_color'];
+
+// The highlight colours end up in a style attribute in the grid, so only a
+// plain #rrggbb literal is ever stored; anything else becomes NULL (= no
+// highlight, falling back to the activity's own colours).
+const HEX = /^#[0-9a-f]{6}$/i;
+function value(field, body) {
+  const v = body[field] ?? null;
+  if (field !== 'text_color' && field !== 'bg_color') return v;
+  return typeof v === 'string' && HEX.test(v.trim()) ? v.trim().toLowerCase() : null;
+}
 
 // Email the tutor that a session is now theirs. Fire-and-forget: a mail problem
 // (SMTP down, no address on file, email switched off) must never fail — or
@@ -177,7 +191,7 @@ async function notifyAssigned(allocationId) {
 }
 
 router.post('/', requireEditor, async (req, res) => {
-  const vals = fields.map((f) => req.body[f] ?? null);
+  const vals = fields.map((f) => value(f, req.body));
   const [r] = await pool.query(
     `INSERT INTO allocations (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`,
     vals
@@ -200,7 +214,7 @@ router.put('/:id', requireEditor, async (req, res) => {
 
   await pool.query(
     `UPDATE allocations SET ${sets.map((f) => `${f}=?`).join(',')} WHERE id=?`,
-    [...sets.map((f) => req.body[f] ?? null), req.params.id]
+    [...sets.map((f) => value(f, req.body)), req.params.id]
   );
   res.json({ ok: true });
 

@@ -165,6 +165,12 @@ table.tt td.batch[draggable="true"] { cursor: grab; }
 table.tt td.batch[draggable="true"]:active { cursor: grabbing; }
 table.tt tr.row-drag-above td { border-top: 3px solid var(--brand); }
 table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
+/* an activity added from the right-click menu, painted with its own colours:
+   the whole cell takes the highlight, so the sub-lines follow the font colour
+   instead of the default indigo/grey */
+.cell.tinted { padding: 4px 6px; }
+.cell.tinted .fac, .cell.tinted .room { color: inherit; opacity: .85; }
+.fac.extra.tinted { border-radius: 4px; padding: 3px 5px; border-top: none; }
 /* a tutor's session request, not yet approved by an admin */
 .cell.pending { opacity: .65; outline: 1px dashed var(--warn); }
 .cell .badge.pending { background: var(--warn); }
@@ -172,6 +178,10 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
   .cell[draggable="true"] { cursor: default; }
   table.tt td.batch[draggable="true"] { cursor: default; }
   .cell.pending { display: none; }   /* never print an unapproved session */
+  /* the point of a highlight is that it survives onto paper */
+  .cell.tinted, .fac.extra.tinted {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
 }
 
 /* pending-approval count on the Approvals nav item */
@@ -251,6 +261,31 @@ label.pick-row:hover { background: var(--brand-tint); }
 label.pick-row.on { background: var(--brand-tint); font-weight: 600; }
 .pick-row input[type="checkbox"] { width: auto; margin: 0; flex: none; }
 .pick-row .sub { font-size: 12px; color: var(--muted); font-weight: 400; }
+
+/* ---- Activity highlight picker (right-click a cell → "Add activity…") ---- */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.chip {
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1.4;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid transparent;
+  cursor: pointer;
+}
+.chip.on, .swatch.on { box-shadow: 0 0 0 2px var(--brand); }
+.swatch {
+  width: 36px; height: 28px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); font: inherit; font-size: 12px; font-weight: 700;
+}
+.color-pick {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--muted); font-weight: 600;
+}
+.color-pick input[type="color"] {
+  width: 46px; height: 30px; padding: 2px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 6px; background: none;
+}
+.act-preview {
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 7px 9px; font-weight: 700; text-align: center;
+}
 
 /* ---- Login ---- */
 .login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding: 16px; }
