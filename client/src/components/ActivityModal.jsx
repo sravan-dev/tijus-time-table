@@ -103,6 +103,20 @@ export default function ActivityModal({ target, programId, date, onClose, onSave
     }
   }
 
+  // Take the activity back out of the cell entirely (the row is a session like
+  // any other, so this is the same delete as "Clear session").
+  async function remove() {
+    if (!confirm('Remove this activity from the timetable?')) return;
+    setBusy(true); setErr('');
+    try {
+      await api.delete(`/allocations/${target.id}`);
+      onSaved();
+    } catch (e) {
+      setErr(e.response?.data?.error || 'Could not remove the activity');
+      setBusy(false);
+    }
+  }
+
   const where = [target?.batch_name, target?.slot_label].filter(Boolean).join(' · ');
   const preview = known?.code || codeOf(name) || 'ACTIVITY';
 
@@ -176,6 +190,10 @@ export default function ActivityModal({ target, programId, date, onClose, onSave
 
         {err && <div className="err">{err}</div>}
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
+          {isEdit && (
+            <button className="btn danger" onClick={remove} disabled={busy}>Remove activity</button>
+          )}
+          <span style={{ flex: 1 }} />
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn" onClick={save} disabled={busy}>
             {busy ? 'Saving…' : (isEdit ? 'Save' : 'Add activity')}

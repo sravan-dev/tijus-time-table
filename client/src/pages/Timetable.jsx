@@ -227,11 +227,12 @@ export default function Timetable() {
 
   // Delete a single session (the right-clicked cell).
   async function clearSession(a) {
-    if (!confirm('Clear this session?')) return;
+    const activity = isHighlighted(a);   // added via "Add activity…", not a class
+    if (!confirm(activity ? 'Remove this activity?' : 'Clear this session?')) return;
     try {
       await api.delete(`/allocations/${a.id}`);
       await reload();
-      toast('Session cleared');
+      toast(activity ? 'Activity removed' : 'Session cleared');
     } catch (e) {
       toast(e.response?.data?.error || 'Could not clear the session', 'error');
     }
@@ -605,7 +606,11 @@ export default function Timetable() {
                                   className={'fac extra' + (highlight(x) ? ' tinted' : '')}
                                   style={highlight(x)}
                                   title={xc ? xc.map((c) => c.message).join('\n')
-                                    : (canEdit ? 'Additional faculty — click to edit' : undefined)}
+                                    : (canEdit
+                                      ? (highlight(x)
+                                        ? 'Activity — click to edit, right-click to remove'
+                                        : 'Additional faculty — click to edit')
+                                      : undefined)}
                                   onClick={(e) => {
                                     if (!canEdit || moving) return;
                                     e.stopPropagation();
@@ -744,7 +749,7 @@ export default function Timetable() {
                 {menu.allocation && (
                   <button className="ctx-item danger"
                     onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
-                    Clear session
+                    {isHighlighted(menu.allocation) ? 'Remove activity' : 'Clear session'}
                   </button>
                 )}
               </>
