@@ -4,17 +4,17 @@ import api from '../api/client';
 import { useAuth } from '../auth';
 import { useToast } from '../components/Toast';
 import SplitRoomModal from '../components/SplitRoomModal';
+import ColourPicker from '../components/ColourPicker';
 
 export default function Manage() {
   // Keep the active sub-tab in the URL (?tab=) so a refresh preserves it.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = ['batches', 'faculty', 'modules', 'rooms'].includes(searchParams.get('tab'))
-    ? searchParams.get('tab') : 'batches';
+  const tab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'batches';
   const setTab = (t) => setSearchParams({ tab: t }, { replace: true });
   return (
     <div className="page">
       <div className="tabs" style={{ marginBottom: 12 }}>
-        {['batches', 'faculty', 'modules', 'rooms'].map((t) => (
+        {TABS.map((t) => (
           <div key={t} className={'tab' + (t === tab ? ' active' : '')} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
           </div>
@@ -24,9 +24,14 @@ export default function Manage() {
       {tab === 'faculty' && <Faculty />}
       {tab === 'modules' && <Modules />}
       {tab === 'rooms' && <Rooms />}
+      {tab === 'activities' && <Activities />}
     </div>
   );
 }
+
+// "Modules" here is tutor capability (who can teach Listening/Reading/…);
+// "Activities" is the session-type list the grid prints as R, W, W.C and so on.
+const TABS = ['batches', 'faculty', 'modules', 'rooms', 'activities'];
 
 function Batches() {
   const { canEdit } = useAuth();
@@ -328,6 +333,167 @@ function Rooms() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Session types: the short codes the timetable grid prints in each cell (R, W,
+// W.C) together with what they actually mean, and the colours they highlight
+// with. Codes come in from the imported sheets, so most start life without a
+// full name until someone fills one in here.
+function Activities() {
+  const { canEdit } = useAuth();
+  const toast = useToast();
+  const [rows, setRows] = useState([]);
+  const [editing, setEditing] = useState(null); // activity being edited
+
+  const load = () => api.get('/activities?usage=1').then((r) => setRows(r.data));
+  useEffect(() => { load(); }, []);
+
+  async function add() {
+    const name = prompt('Activity name? (e.g. Reading)');
+    if (!name?.trim()) return;
+    const code = prompt('Short code shown in the grid?', name.trim().toUpperCase().slice(0, 20));
+    if (!code?.trim()) return;
+    try {
+      await api.post('/activities', { name: name.trim(), code: code.trim() });
+      await load();
+      toast(`Added ${code.trim().toUpperCase()}`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not add the activity', 'error');
+    }
+  }
+
+  async function del(a) {
+    const used = a.usage_count
+      ? `\n\n${a.usage_count} session${a.usage_count === 1 ? '' : 's'} use it and will be left without a type.`
+      : '';
+    if (!confirm(`Delete the activity ${a.code}?${used}`)) return;
+    try {
+      await api.delete(`/activities/${a.id}`);
+      await load();
+      toast(`Deleted ${a.code}`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Delete failed', 'error');
+    }
+  }
+
+  const named = rows.filter((a) => a.name && a.name !== a.code).length;
+
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+        <b>Activities ({rows.length})</b>
+        {canEdit && <button className="btn sm" onClick={add}>+ Add</button>}
+      </div>
+      <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
+        The <b>code</b> is what each timetable cell prints; the <b>name</b> is what it stands for.
+        Colours here are the default highlight for that type — a cell can still override them.
+        {named < rows.length && ` ${rows.length - named} type(s) have no full name yet.`}
+      </div>
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Code</th><th>Name</th><th>Preview</th><th>Sessions</th>
+            {canEdit && <th />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a) => (
+            <tr key={a.id}>
+              <td><b>{a.code}</b></td>
+              <td>{a.name && a.name !== a.code
+                ? a.name
+                : <span style={{ color: 'var(--muted)' }}>no name yet</span>}</td>
+              <td>
+                <span className="act-preview"
+                  style={{ color: a.text_color || 'inherit', background: a.bg_color || 'transparent' }}>
+                  {a.code}
+                </span>
+              </td>
+              <td>{a.usage_count ?? 0}</td>
+              {canEdit && (
+                <td>
+                  <button className="btn sm" onClick={() => setEditing(a)}>Edit</button>
+                  <button className="btn sm danger" style={{ marginLeft: 6 }} onClick={() => del(a)}>Delete</button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length && (
+        <div className="notif-empty">No activity types yet.</div>
+      )}
+
+      {editing && (
+        <ActivityEditor
+          activity={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(code) => { setEditing(null); load(); toast(`Saved ${code}`); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Edit one activity's code, name and default colours.
+function ActivityEditor({ activity, onClose, onSaved }) {
+  const [code, setCode] = useState(activity.code);
+  const [name, setName] = useState(activity.name === activity.code ? '' : activity.name || '');
+  const [text, setText] = useState(activity.text_color || '#334155');
+  const [bg, setBg] = useState(activity.bg_color || '#e2e8f0');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save(colours = true) {
+    if (!code.trim()) return setErr('A code is required');
+    if (!name.trim()) return setErr('A name is required');
+    setBusy(true); setErr('');
+    try {
+      await api.put(`/activities/${activity.id}`, {
+        code: code.trim(),
+        name: name.trim(),
+        // Empty strings clear the colours back to no highlight.
+        text_color: colours ? text : '',
+        bg_color: colours ? bg : '',
+      });
+      onSaved(code.trim().toUpperCase());
+    } catch (e) {
+      setErr(e.response?.data?.error || 'Save failed');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Edit activity</h3>
+        <div className="field">
+          <label>Code shown in the grid</label>
+          <input value={code} maxLength={20} onChange={(e) => setCode(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>What it stands for</label>
+          <input value={name} maxLength={80} placeholder="e.g. Reading"
+            onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Default highlight</label>
+          <ColourPicker text={text} bg={bg}
+            onChange={({ text: t, bg: b }) => { setText(t); setBg(b); }} />
+        </div>
+        {err && <div style={{ color: 'var(--error)', fontSize: 13 }}>{err}</div>}
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn ghost" onClick={() => save(false)} disabled={busy}>
+            Save without colours
+          </button>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn" onClick={() => save(true)} disabled={busy}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

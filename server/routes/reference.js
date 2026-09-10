@@ -42,8 +42,14 @@ router.put('/slots/:id', requireEditor, async (req, res) => {
   }
 });
 
-router.get('/activities', async (_req, res) => {
-  const [rows] = await pool.query('SELECT * FROM activities ORDER BY name');
+// `?usage=1` adds how many sessions each type is used by — Manage → Activities
+// shows it so nobody renames or deletes a heavily used type without noticing.
+router.get('/activities', async (req, res) => {
+  const sql = req.query.usage
+    ? `SELECT a.*, (SELECT COUNT(*) FROM allocations al WHERE al.activity_id = a.id) AS usage_count
+         FROM activities a ORDER BY a.name`
+    : 'SELECT * FROM activities ORDER BY name';
+  const [rows] = await pool.query(sql);
   res.json(rows);
 });
 
@@ -81,6 +87,42 @@ router.post('/activities', requireEditor, async (req, res) => {
     [code, name.slice(0, 80), text_color, bg_color]
   );
   res.json({ id: r.insertId, code, name: name.slice(0, 80), text_color, bg_color });
+});
+
+// Edit an activity type: its code (what the grid cell prints), its full name
+// ("R" -> "Reading"), and its default highlight colours. Existing sessions keep
+// their activity_id, so they simply re-display under the new code and colours.
+// Colours are cleared by sending an empty string, kept by omitting the field.
+router.put('/activities/:id', requireEditor, async (req, res) => {
+  const [[existing]] = await pool.query('SELECT * FROM activities WHERE id = ?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Activity not found' });
+
+  const name = String(req.body.name ?? existing.name).trim();
+  if (!name) return res.status(400).json({ error: 'An activity name is required' });
+  const code = String(req.body.code ?? existing.code).trim().toUpperCase().slice(0, 20);
+  if (!code) return res.status(400).json({ error: 'An activity code is required' });
+  const pick = (field) => (field in req.body ? colour(req.body[field]) : existing[field]);
+
+  try {
+    await pool.query(
+      'UPDATE activities SET code = ?, name = ?, text_color = ?, bg_color = ? WHERE id = ?',
+      [code, name.slice(0, 80), pick('text_color'), pick('bg_color'), req.params.id]
+    );
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY')
+      return res.status(409).json({ error: `Another activity already uses the code ${code}` });
+    throw e;
+  }
+  res.json({ ok: true });
+});
+
+// Delete an activity type. allocations.activity_id is ON DELETE SET NULL, so
+// sessions using it survive but lose their type — the caller is told how many
+// that would be (via ?usage=1 on the list) before it comes to this.
+router.delete('/activities/:id', requireEditor, async (req, res) => {
+  const [r] = await pool.query('DELETE FROM activities WHERE id = ?', [req.params.id]);
+  if (!r.affectedRows) return res.status(404).json({ error: 'Activity not found' });
+  res.json({ ok: true });
 });
 
 // ---- Faculty -------------------------------------------------------------
