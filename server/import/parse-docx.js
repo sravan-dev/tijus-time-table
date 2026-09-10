@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from '../db/pool.js';
-import { readTables } from './docx-table.js';
+import { readTablesFromXml } from './docx-table.js';
 import AdmZipLike from './unzip.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ const WEEKDAYS = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 // "MONDAY 22.docx" -> "2026-06-22". Returns null for files that aren't weekday
 // sheets (so stray .docx in data/ are ignored). Throws if a weekday sheet's day
 // doesn't land on that weekday in any month near the anchor.
-function resolveDate(filename) {
+export function resolveDate(filename) {
   const m = filename
     .toUpperCase()
     .match(/\b(SUN|MON|TUE|WED|THU|FRI|SAT)[A-Z]*\b[^0-9]*(\d{1,2})\b/);
@@ -54,6 +54,14 @@ function resolveDate(filename) {
   );
 }
 
+// The weekday a sheet is named for, 0 = Sunday, or null when the filename
+// names none. Unlike resolveDate this never throws, so a Knowledge Base sheet
+// whose day-of-month doesn't line up is still filed under the right weekday.
+export function weekdayFromName(filename) {
+  const m = filename.toUpperCase().match(/\b(SUN|MON|TUE|WED|THU|FRI|SAT)[A-Z]*\b/);
+  return m ? WEEKDAYS[m[1]] : null;
+}
+
 // Discover every "<WEEKDAY> <DD>.docx" in data/, mapped filename -> ISO date,
 // ordered by date.
 function discoverFileDates() {
@@ -77,8 +85,7 @@ function visibleText(xmlChunk) {
 
 // Determine which program each table belongs to, using the title paragraphs
 // that sit between tables in document order.
-function detectProgramsPerTable(docxPath) {
-  const xml = AdmZipLike.readEntry(docxPath, 'word/document.xml');
+function detectProgramsFromXml(xml) {
   const parts = xml.split('<w:tbl>');
   const result = [];
   // parts[0] = text before table0; parts[i] (i>=1) starts with table i-1's body.
@@ -140,19 +147,24 @@ function extractMonth(label) {
   return null;
 }
 
-// Parse the daily .docx files into `allocations`. Pass { dry: true } to
-// preview without writing. Returns the number of allocations inserted.
-export async function importDocx({ dry: DRY = false } = {}) {
-  const FILE_DATES = discoverFileDates();
-  const found = Object.entries(FILE_DATES);
-  if (!found.length) {
-    throw new Error(`No "<WEEKDAY> <DD>.docx" timetable files found in ${DATA_DIR}`);
-  }
-  console.log(`Discovered ${found.length} timetable file(s) in data/:`);
-  for (const [file, date] of found) console.log(`  ${date}  ${file}`);
-
+// Turn already-loaded sheets into allocation rows, without writing any of them.
+// `sheets` is [{ label, xml, date }] where `xml` is the sheet's
+// word/document.xml and `date` the ISO date the sessions belong to. The same
+// code backs both the data/ import and the Knowledge Base (whose sheets live as
+// blobs in the database), so a KB sheet is read exactly like an imported one.
+//
+// Reference rows the sheets mention but the database lacks (a tutor, a room, a
+// batch) are created as a side effect, unless { dry: true } is passed.
+export async function parseDocxSheets(sheets, { dry: DRY = false } = {}) {
   const conn = await pool.getConnection();
+  try {
+    return await parseWithConn(conn, sheets, DRY);
+  } finally {
+    conn.release();
+  }
+}
 
+async function parseWithConn(conn, sheets, DRY) {
   // Lookups
   const [progRows] = await conn.query('SELECT id, code FROM programs');
   const progByCode = Object.fromEntries(progRows.map((p) => [p.code, p.id]));
@@ -286,14 +298,10 @@ export async function importDocx({ dry: DRY = false } = {}) {
   const allAllocs = [];
   const sample = [];
 
-  for (const [file, isoDate] of Object.entries(FILE_DATES)) {
-    const full = path.join(DATA_DIR, file);
-    if (!fs.existsSync(full)) {
-      console.warn('  (missing) ' + file);
-      continue;
-    }
-    const tables = readTables(full);
-    const progs = detectProgramsPerTable(full);
+  for (const sheet of sheets) {
+    const isoDate = sheet.date;
+    const tables = readTablesFromXml(sheet.xml);
+    const progs = detectProgramsFromXml(sheet.xml);
 
     for (let ti = 0; ti < tables.length; ti++) {
       const rows = tables[ti];
@@ -384,7 +392,51 @@ export async function importDocx({ dry: DRY = false } = {}) {
     }
   }
 
-  console.log(`\nParsed ${allAllocs.length} allocations across ${Object.keys(FILE_DATES).length} files.`);
+  return { allocations: allAllocs, sample, newFaculty, newRooms, newBatches };
+}
+
+// Columns written for a parsed session, shared by the data/ import and the
+// Knowledge Base "apply to a day" action.
+export const ALLOC_COLS = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
+  'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'raw_text', 'note'];
+
+// Insert parsed rows in chunks (a full day is a few hundred sessions).
+export async function insertAllocations(rows, conn = pool) {
+  const values = rows.map((a) => ALLOC_COLS.map((c) => a[c]));
+  for (let i = 0; i < values.length; i += 200) {
+    await conn.query(
+      `INSERT INTO allocations (${ALLOC_COLS.join(',')}) VALUES ?`,
+      [values.slice(i, i + 200)]
+    );
+  }
+  return rows.length;
+}
+
+// Parse the daily .docx files in data/ into `allocations`. Pass { dry: true }
+// to preview without writing. Returns the number of allocations inserted.
+export async function importDocx({ dry: DRY = false } = {}) {
+  const FILE_DATES = discoverFileDates();
+  const found = Object.entries(FILE_DATES);
+  if (!found.length) {
+    throw new Error(`No "<WEEKDAY> <DD>.docx" timetable files found in ${DATA_DIR}`);
+  }
+  console.log(`Discovered ${found.length} timetable file(s) in data/:`);
+  for (const [file, date] of found) console.log(`  ${date}  ${file}`);
+
+  const sheets = [];
+  for (const [file, date] of found) {
+    const full = path.join(DATA_DIR, file);
+    if (!fs.existsSync(full)) {
+      console.warn('  (missing) ' + file);
+      continue;
+    }
+    sheets.push({ label: file, date, xml: AdmZipLike.readEntry(full, 'word/document.xml') });
+  }
+
+  const { allocations, sample, newFaculty, newRooms, newBatches } =
+    await parseDocxSheets(sheets, { dry: DRY });
+
+  console.log(`\nParsed ${allocations.length} allocations across ${sheets.length} files.`);
   console.log('Sample (OET/IELTS sessions):');
   console.table(sample);
   console.log('New faculty created:', newFaculty);
@@ -393,22 +445,15 @@ export async function importDocx({ dry: DRY = false } = {}) {
 
   if (DRY) {
     console.log('\n--dry: nothing written.');
-    conn.release();
     return 0;
   }
 
   // wipe existing allocations for these dates, then insert
-  const dates = Object.values(FILE_DATES);
-  await conn.query('DELETE FROM allocations WHERE alloc_date IN (?)', [dates]);
-  const cols = ['alloc_date', 'program_id', 'batch_id', 'activity_id', 'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'raw_text', 'note'];
-  const values = allAllocs.map((a) => cols.map((c) => a[c]));
-  for (let i = 0; i < values.length; i += 200) {
-    const chunk = values.slice(i, i + 200);
-    await conn.query(`INSERT INTO allocations (${cols.join(',')}) VALUES ?`, [chunk]);
-  }
-  console.log(`✅ Inserted ${allAllocs.length} allocations.`);
-  conn.release();
-  return allAllocs.length;
+  const dates = sheets.map((s) => s.date);
+  await pool.query('DELETE FROM allocations WHERE alloc_date IN (?)', [dates]);
+  await insertAllocations(allocations);
+  console.log(`Inserted ${allocations.length} allocations.`);
+  return allocations.length;
 }
 
 // CLI entry point: `node import/parse-docx.js [--dry]`

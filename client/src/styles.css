@@ -387,6 +387,16 @@ label.pick-row.on { background: var(--brand-tint); font-weight: 600; }
   .ticket-layout { grid-template-columns: 1fr; }
 }
 
+/* ---- Knowledge Base ---- */
+.kb-intro p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+.kb-intro p + p { margin-top: 8px; }
+.kb-warn { color: var(--warn); font-size: 12.5px; }
+.kb-table td, .kb-table th { text-align: center; vertical-align: middle; }
+.kb-table td { padding: 8px 10px; }
+.kb-title { font-weight: 600; font-size: 13.5px; }
+.kb-file { color: var(--muted); font-size: 12px; }
+.kb-bad td { background: var(--warn-bg); }
+
 /* ---- Tables (manage) ---- */
 table.data { border-collapse: collapse; width: 100%; font-size: 14px; }
 table.data th, table.data td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }

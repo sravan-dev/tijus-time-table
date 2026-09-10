@@ -4,8 +4,12 @@ import fs from 'fs';
 import zlib from 'zlib';
 
 function readEntry(zipPath, entryName) {
-  const buf = fs.readFileSync(zipPath);
+  return readEntryFrom(fs.readFileSync(zipPath), entryName, zipPath);
+}
 
+// The same reader over an in-memory .docx. Knowledge Base sheets are stored as
+// blobs in the database, so they are parsed without ever hitting the disk.
+function readEntryFrom(buf, entryName, label = '<buffer>') {
   // Locate End Of Central Directory record (signature 0x06054b50).
   let eocd = -1;
   for (let i = buf.length - 22; i >= 0; i--) {
@@ -14,7 +18,7 @@ function readEntry(zipPath, entryName) {
       break;
     }
   }
-  if (eocd < 0) throw new Error('Not a zip file: ' + zipPath);
+  if (eocd < 0) throw new Error('Not a zip file: ' + label);
 
   const cdCount = buf.readUInt16LE(eocd + 10);
   let ptr = buf.readUInt32LE(eocd + 16); // central directory offset
@@ -46,4 +50,5 @@ function readEntry(zipPath, entryName) {
   throw new Error('Entry not found: ' + entryName);
 }
 
-export default { readEntry };
+export { readEntry, readEntryFrom };
+export default { readEntry, readEntryFrom };

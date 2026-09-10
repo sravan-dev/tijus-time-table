@@ -3,6 +3,7 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS kb_documents;
 DROP TABLE IF EXISTS ticket_messages;
 DROP TABLE IF EXISTS tickets;
 DROP TABLE IF EXISTS allocations;
@@ -201,4 +202,25 @@ CREATE TABLE ticket_messages (
   FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE,
   INDEX idx_tmsg_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Knowledge Base: the reference day-sheets ("MONDAY 7.docx" and friends) the
+-- timetable generator builds a new day from. One row = one sheet, stored as its
+-- gzipped word/document.xml (~15 KB) rather than the whole .docx (~3 MB, past
+-- MySQL's default max_allowed_packet) — the rest of the file is embedded fonts
+-- the parser never reads. See db/migrate-kb.js.
+CREATE TABLE kb_documents (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  title         VARCHAR(160) NOT NULL,
+  filename      VARCHAR(200) NOT NULL,
+  weekday       TINYINT NULL,               -- 0 = Sunday; NULL = not a day sheet
+  sheet_date    DATE NULL,                  -- the date the sheet itself is for
+  size_bytes    INT NOT NULL DEFAULT 0,     -- the .docx as uploaded, for display
+  sheet_xml     LONGBLOB NOT NULL,          -- gzipped word/document.xml
+  session_count INT NOT NULL DEFAULT 0,     -- sessions found the last time it parsed
+  parse_error   VARCHAR(255) NULL,
+  uploaded_by   INT NULL,
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_kb_filename (filename),
+  KEY idx_kb_weekday (weekday)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

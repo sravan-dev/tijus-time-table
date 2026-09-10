@@ -20,6 +20,7 @@ import notificationRoutes from './routes/notifications.js';
 import settingsRoutes from './routes/settings.js';
 import ticketRoutes from './routes/tickets.js';
 import supportRoutes from './routes/support.js';
+import knowledgeRoutes from './routes/knowledge.js';
 import { guard, errorHandler } from './middleware/async.js';
 
 // Load server/.env regardless of the working directory (so it works whether
@@ -28,7 +29,9 @@ import { guard, errorHandler } from './middleware/async.js';
 dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '8mb' })); // allow base64 logo uploads
+// 8mb covered base64 logo uploads; Knowledge Base sheets are whole .docx files
+// (a few MB each, and base64 adds a third on top), so the cap is higher.
+app.use(express.json({ limit: '25mb' }));
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -55,6 +58,7 @@ app.use('/api/approvals', guard(approvalRoutes));
 app.use('/api/notifications', guard(notificationRoutes));
 app.use('/api/tickets', guard(ticketRoutes));
 app.use('/api/support', guard(supportRoutes));
+app.use('/api/knowledge', guard(knowledgeRoutes));
 
 // Unmatched API routes return JSON (not the SPA fallback below).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

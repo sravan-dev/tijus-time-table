@@ -1,7 +1,6 @@
 // Minimal WordprocessingML table reader.
 // Reads word/document.xml from a .docx and returns its tables as
 // arrays of rows; each row is an array of cells: { text, lines, span }.
-import AdmZipLike from './unzip.js';
 
 function decode(s) {
   return s
@@ -33,8 +32,9 @@ function gridSpan(tcXml) {
   return m ? Number(m[1]) : 1;
 }
 
-export function readTables(docxPath) {
-  const xml = AdmZipLike.readEntry(docxPath, 'word/document.xml');
+// Reads word/document.xml (already extracted from the .docx, so a sheet held in
+// memory reads the same as one on disk).
+export function readTablesFromXml(xml) {
   const tables = [];
   const tblChunks = xml.split('<w:tbl>').slice(1);
   for (const chunk of tblChunks) {

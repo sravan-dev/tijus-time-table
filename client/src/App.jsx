@@ -16,6 +16,7 @@ import MySessions from './pages/MySessions';
 import MyLeaves from './pages/MyLeaves';
 import Approvals from './pages/Approvals';
 import Tickets from './pages/Tickets';
+import KnowledgeBase from './pages/KnowledgeBase';
 
 // Landing route depends on role.
 const homeFor = (role) => (role === 'faculty' ? '/my-schedule' : '/timetable');
@@ -45,6 +46,7 @@ function Shell({ children }) {
               <NavLink to="/schedule">Leave &amp; Blocks</NavLink>
               {isAdmin && <ApprovalsLink />}
               {isAdmin && <NavLink to="/users">Users</NavLink>}
+              {isAdmin && <NavLink to="/knowledge">Knowledge Base</NavLink>}
               {isAdmin && <NavLink to="/settings">Settings</NavLink>}
               <NavLink to="/tickets">Tickets</NavLink>
               {/* a manager who is also a tutor gets their personal views too */}
@@ -114,6 +116,7 @@ export default function App() {
       <Route path="/users" element={<RoleRoute allow={['admin']}><Users /></RoleRoute>} />
       <Route path="/settings" element={<RoleRoute allow={['admin']}><Settings /></RoleRoute>} />
       <Route path="/approvals" element={<RoleRoute allow={['admin']}><Approvals /></RoleRoute>} />
+      <Route path="/knowledge" element={<RoleRoute allow={['admin']}><KnowledgeBase /></RoleRoute>} />
 
       {/* tutor self-service (role 'faculty' in the DB) */}
       <Route path="/my-schedule" element={<RoleRoute allow={['faculty']} selfSchedule><MySchedule /></RoleRoute>} />

@@ -4,6 +4,7 @@ import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { conflictsForDate } from '../services/conflicts.js';
 import { sendMail, scheduleEmail, sessionAssignedEmail } from '../services/mailer.js';
 import { getSettings } from '../services/settings.js';
+import { sheetForDate, applySheet } from './knowledge.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -105,10 +106,11 @@ router.post('/notify', requireEditor, async (req, res) => {
 });
 
 // POST /api/allocations/generate { date, program_id? }
-// Creates the timetable for an empty day by copying the most recent earlier
-// day that has sessions — preferring the same weekday (last Monday for a
-// Monday, etc.) so the weekly pattern carries over. Refuses if the target
-// day already has sessions (for the program, when one is given).
+// Creates the timetable for an empty day. First choice is the Knowledge Base
+// sheet filed under that weekday (the academy's reference pattern for, say, a
+// Monday); with no matching sheet it falls back to copying the most recent
+// earlier day that has sessions, again preferring the same weekday. Refuses if
+// the target day already has sessions (for the program, when one is given).
 router.post('/generate', requireEditor, async (req, res) => {
   const { date, program_id } = req.body || {};
   if (!date) return res.status(400).json({ error: 'date is required' });
@@ -121,6 +123,15 @@ router.post('/generate', requireEditor, async (req, res) => {
   );
   if (existing.n)
     return res.status(409).json({ error: 'That day already has sessions' });
+
+  // A Knowledge Base sheet beats a copied day: it is the pattern an admin
+  // curated for this weekday. Its own failures (an unreadable sheet, nothing for
+  // this program) are not fatal — we simply fall through to the copy below.
+  const sheet = await sheetForDate(date);
+  if (sheet) {
+    const applied = await applySheet(sheet, { date, program_id });
+    if (!applied.error) return res.json(applied);
+  }
 
   const [cands] = await pool.query(
     `SELECT DISTINCT alloc_date FROM allocations WHERE alloc_date < ?${progFilter}
@@ -145,7 +156,7 @@ router.post('/generate', requireEditor, async (req, res) => {
        FROM allocations WHERE alloc_date = ?${progFilter}`,
     [date, source, ...progParams]
   );
-  res.json({ created: r.affectedRows, source_date: source });
+  res.json({ created: r.affectedRows, source: 'previous-day', source_date: source });
 });
 
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',

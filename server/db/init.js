@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { pool } from './pool.js';
 import { seedReference } from './seed-reference.js';
 import { migrateActivityColors } from './migrate-activity-colors.js';
+import { migrateKnowledgeBase, seedFromFolder } from './migrate-kb.js';
 import { importDocx } from '../import/parse-docx.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,6 +86,12 @@ export async function initDb() {
     try { await migrateActivityColors(pool, { seed: !seedDisabled }); }
     catch (e) { console.error('[init] activity colours patch failed:', e.message); }
 
+    // Knowledge Base: reference day-sheets the generator builds new days from.
+    // The table only — seeding waits until the reference data below exists,
+    // since a sheet is counted against the programs and slots it mentions.
+    try { await migrateKnowledgeBase(pool, { seed: false }); }
+    catch (e) { console.error('[init] knowledge base patch failed:', e.message); }
+
     // 3. Seed reference data (programs, rooms, faculty, batches, users, settings)
     //    only if not present.
     const [[{ n: progs }]] = await pool.query('SELECT COUNT(*) AS n FROM programs');
@@ -99,6 +106,14 @@ export async function initDb() {
       console.log('[init] Importing timetables from data/*.docx …');
       const inserted = await importDocx();
       console.log(`[init] Imported ${inserted} sessions.`);
+    }
+
+    // 5. Load the reference day-sheets shipped in "Knowledge Base/" the first
+    //    time, now that programs and slots exist for them to be counted against.
+    const [[{ n: kb }]] = await pool.query('SELECT COUNT(*) AS n FROM kb_documents');
+    if (kb === 0 && !seedDisabled) {
+      try { await seedFromFolder(pool); }
+      catch (e) { console.error('[init] knowledge base seed failed:', e.message); }
     }
 
     const [[{ n: total }]] = await pool.query('SELECT COUNT(*) AS n FROM allocations');
