@@ -149,10 +149,10 @@ router.post('/generate', requireEditor, async (req, res) => {
   const [r] = await pool.query(
     `INSERT INTO allocations (alloc_date, program_id, batch_id, activity_id, time_slot_id,
                               classroom_id, faculty_id, student_count, raw_text, note,
-                              text_color, bg_color)
+                              text_color, bg_color, note_text_color, note_bg_color)
      SELECT ?, program_id, batch_id, activity_id, time_slot_id,
             classroom_id, faculty_id, student_count, raw_text, note,
-            text_color, bg_color
+            text_color, bg_color, note_text_color, note_bg_color
        FROM allocations WHERE alloc_date = ?${progFilter}`,
     [date, source, ...progParams]
   );
@@ -161,7 +161,9 @@ router.post('/generate', requireEditor, async (req, res) => {
 
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
   'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'note',
-  'text_color', 'bg_color'];
+  'text_color', 'bg_color', 'note_text_color', 'note_bg_color'];
+
+const COLOUR_FIELDS = new Set(['text_color', 'bg_color', 'note_text_color', 'note_bg_color']);
 
 // The highlight colours end up in a style attribute in the grid, so only a
 // plain #rrggbb literal is ever stored; anything else becomes NULL (= no
@@ -169,7 +171,7 @@ const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
 const HEX = /^#[0-9a-f]{6}$/i;
 function value(field, body) {
   const v = body[field] ?? null;
-  if (field !== 'text_color' && field !== 'bg_color') return v;
+  if (!COLOUR_FIELDS.has(field)) return v;
   return typeof v === 'string' && HEX.test(v.trim()) ? v.trim().toLowerCase() : null;
 }
 

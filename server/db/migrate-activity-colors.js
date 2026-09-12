@@ -45,6 +45,10 @@ export async function migrateActivityColors(conn = pool, { seed = true } = {}) {
     await addColumn(conn, table, 'text_color', 'text_color VARCHAR(9) NULL');
     await addColumn(conn, table, 'bg_color', 'bg_color VARCHAR(9) NULL');
   }
+  // The free-text note on a session has its own colours, independent of the
+  // cell highlight, so a note can stand out on an otherwise plain cell.
+  await addColumn(conn, 'allocations', 'note_text_color', 'note_text_color VARCHAR(9) NULL');
+  await addColumn(conn, 'allocations', 'note_bg_color', 'note_bg_color VARCHAR(9) NULL');
   if (!seed) return;
   for (const [code, name, text, bg] of HIGHLIGHT_ACTIVITIES) {
     // Only fill in colours that are still empty, so an admin's own choice

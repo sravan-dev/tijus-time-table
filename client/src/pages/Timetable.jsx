@@ -7,6 +7,12 @@ import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
 import ReassignModal from '../components/ReassignModal';
 import NoteModal from '../components/NoteModal';
+
+// Inline colours for a session note, if the note was given its own.
+function noteStyle(a) {
+  if (!a.note_text_color && !a.note_bg_color) return undefined;
+  return { color: a.note_text_color || undefined, background: a.note_bg_color || undefined };
+}
 import BatchModal from '../components/BatchModal';
 import ActivityModal from '../components/ActivityModal';
 import SplitCellModal from '../components/SplitCellModal';
@@ -593,7 +599,7 @@ export default function Timetable() {
                             <div className="act">
                               {a.activity_code || ''}{' '}
                               {a.note && (a.activity_code || a.faculty_name) && (
-                                <span className="note" title={a.note}>{a.note}</span>
+                                <span className="note" title={a.note} style={noteStyle(a)}>{a.note}</span>
                               )}{' '}
                               {level && <span className={'badge ' + level}>!</span>}
                               {a.status === 'pending' && (
@@ -642,7 +648,7 @@ export default function Timetable() {
                                   }}>
                                   {label ? `+ ${label}` : <span className="empty-area">+ activity</span>}
                                   {x.note && label && x.note !== label && (
-                                    <span className="note" title={x.note}>{x.note}</span>
+                                    <span className="note" title={x.note} style={noteStyle(x)}>{x.note}</span>
                                   )}
                                   {xl && <span className={'badge ' + xl}>!</span>}
                                   {x.status === 'pending' && (
