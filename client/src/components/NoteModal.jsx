@@ -6,8 +6,6 @@ import ColourPicker from './ColourPicker';
 // grid on the activity line, right after the code (e.g. "W  bring workbooks").
 export default function NoteModal({ allocation, onClose, onSaved }) {
   const [note, setNote] = useState(allocation.note || '');
-  // colours are optional: with none set the note is small grey italic text
-  const [coloured, setColoured] = useState(!!(allocation.note_text_color || allocation.note_bg_color));
   const [text, setText] = useState(allocation.note_text_color || '#5b21b6');
   const [bg, setBg] = useState(allocation.note_bg_color || '#ede9fe');
   const [busy, setBusy] = useState(false);
@@ -20,8 +18,8 @@ export default function NoteModal({ allocation, onClose, onSaved }) {
       const v = value.trim();
       await api.put(`/allocations/${allocation.id}`, {
         note: v || null,
-        note_text_color: v && coloured ? text : null,
-        note_bg_color: v && coloured ? bg : null,
+        note_text_color: v ? text : null,
+        note_bg_color: v ? bg : null,
       });
       onSaved();
     } catch (e) {
@@ -47,22 +45,16 @@ export default function NoteModal({ allocation, onClose, onSaved }) {
               onChange={(e) => setNote(e.target.value)} />
           </div>
           <div className="field">
-            <label className="row" style={{ gap: 6, cursor: 'pointer' }}>
-              <input type="checkbox" checked={coloured}
-                onChange={(e) => setColoured(e.target.checked)} />
-              Colour the note
-            </label>
-            {coloured && (
-              <ColourPicker text={text} bg={bg}
-                onChange={(c) => { setText(c.text); setBg(c.bg); }} />
-            )}
+            <label>Colours</label>
+            <ColourPicker text={text} bg={bg}
+              onChange={(c) => { setText(c.text); setBg(c.bg); }} />
           </div>
           {note.trim() && (
             <div className="field">
               <label>Preview</label>
               <div className="act-preview">
                 <span className="act">{allocation.activity_code || 'W'}</span>{' '}
-                <span className="note" style={coloured ? { color: text, background: bg } : undefined}>
+                <span className="note" style={{ color: text, background: bg }}>
                   {note.trim()}
                 </span>
               </div>
