@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
 import ReassignModal from '../components/ReassignModal';
+import NoteModal from '../components/NoteModal';
 import BatchModal from '../components/BatchModal';
 import ActivityModal from '../components/ActivityModal';
 import SplitCellModal from '../components/SplitCellModal';
@@ -26,6 +27,7 @@ export default function Timetable() {
   const [editingSlot, setEditingSlot] = useState(null); // time slot being re-timed
   const [menu, setMenu] = useState(null); // right-click menu { x, y, allocation } or { x, y, batch }
   const [reassigning, setReassigning] = useState(null); // allocation being reassigned
+  const [noting, setNoting] = useState(null); // allocation whose note is being edited
   const [addingFaculty, setAddingFaculty] = useState(null); // allocation getting a co-teacher
   // Highlighted activity being added to a cell (or an existing one being
   // recoloured): a cell stub { batch_id, time_slot_id, … } or an allocation.
@@ -590,6 +592,9 @@ export default function Timetable() {
                           <>
                             <div className="act">
                               {a.activity_code || ''}{' '}
+                              {a.note && (a.activity_code || a.faculty_name) && (
+                                <span className="note" title={a.note}>{a.note}</span>
+                              )}{' '}
                               {level && <span className={'badge ' + level}>!</span>}
                               {a.status === 'pending' && (
                                 <span className="badge pending" title="Awaiting admin approval">⏳</span>
@@ -636,6 +641,9 @@ export default function Timetable() {
                                     setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef });
                                   }}>
                                   {label ? `+ ${label}` : <span className="empty-area">+ activity</span>}
+                                  {x.note && label && x.note !== label && (
+                                    <span className="note" title={x.note}>{x.note}</span>
+                                  )}
                                   {xl && <span className={'badge ' + xl}>!</span>}
                                   {x.status === 'pending' && (
                                     <span className="badge pending" title="Awaiting admin approval">⏳</span>
@@ -752,6 +760,10 @@ export default function Timetable() {
                       }}>
                       Add additional session…
                     </button>
+                    <button className="ctx-item"
+                      onClick={() => { setNoting(menu.allocation); setMenu(null); }}>
+                      {menu.allocation.note ? 'Edit note…' : 'Add note…'}
+                    </button>
                   </>
                 )}
                 {menu.cell && (
@@ -788,6 +800,14 @@ export default function Timetable() {
             )}
           </div>
         </div>
+      )}
+
+      {noting && (
+        <NoteModal
+          allocation={noting}
+          onClose={() => setNoting(null)}
+          onSaved={() => { setNoting(null); reload(); }}
+        />
       )}
 
       {reassigning && (
