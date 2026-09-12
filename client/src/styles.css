@@ -416,6 +416,13 @@ table.data thead th { background: #f8fafc; }
   .topbar nav a { white-space: nowrap; }
   .topbar .who { font-size: 12px; }
 
+  /* Notification panel: the bell sits mid-row, so a right-anchored 340px
+     dropdown hangs off the left edge. Pin it to the viewport instead. */
+  .notif-panel {
+    position: fixed; top: var(--notif-top, 58px); left: 12px; right: 12px;
+    width: auto; max-width: none;
+  }
+
   .page { padding: 14px 14px; }
 
   /* Manage/Users/Settings tables scroll horizontally rather than squashing. */

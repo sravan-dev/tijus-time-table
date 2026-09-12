@@ -28,6 +28,10 @@ export default function NotificationBell() {
     const next = !open;
     setOpen(next);
     if (next) {
+      // on narrow screens the panel is position:fixed (see styles.css), so
+      // tell it where the bell's bottom edge is
+      const r = ref.current?.getBoundingClientRect();
+      if (r) ref.current.style.setProperty('--notif-top', `${Math.round(r.bottom + 6)}px`);
       localStorage.setItem('tijus_notif_seen', String(items.length));
       setSeen(items.length);
     }
