@@ -445,7 +445,17 @@ table.data thead th { background: #f8fafc; }
   .modal { padding: 18px; }
 }
 
+/* "Print all": every program's grid, one per page, only on paper */
+.print-all { display: none; }
 @media print {
   .topbar, .controls, .no-print { display: none !important; }
   .grid-wrap { border: none; }
+  @page { size: landscape; margin: 10mm; }
+  .printing-all > .grid-wrap { display: none; }
+  .printing-all .print-all { display: block; }
+  .print-prog { break-after: page; }
+  .print-prog:last-child { break-after: auto; }
+  .print-title { font-size: 16px; margin: 0 0 8px; }
+  .print-all table.tt thead th, .print-all table.tt td.batch { position: static; }
+  .print-all .cell .note { max-width: none; white-space: normal; }
 }

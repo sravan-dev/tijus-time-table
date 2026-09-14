@@ -48,6 +48,10 @@ export default function Timetable() {
   const [columnClip, setColumnClip] = useState(null);
   // Single cell copied with "Copy cell": { date, slot:{id,label}, batch:{id,name}, programId }.
   const [cellClip, setCellClip] = useState(null);
+  // Every program's grid for the day, loaded for "Print all":
+  // [{ program, slots, rows }]. Set only while the print dialog is up.
+  const [printData, setPrintData] = useState(null);
+  const [printing, setPrinting] = useState(false);
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -111,31 +115,10 @@ export default function Timetable() {
   // and the current slot grid are kept, so another program's sessions (e.g.
   // German's batch-less, per-tutor rows) can never render as blank "—" rows.
   const slotIds = useMemo(() => new Set(slots.map((s) => s.id)), [slots]);
-  const { batches } = useMemo(() => {
-    const byBatch = new Map();
-    for (const a of data.allocations) {
-      if (programId && a.program_id !== programId) continue;      // other program leaked in
-      if (slotIds.size && !slotIds.has(a.time_slot_id)) continue; // slot not in this grid
-      const key = a.batch_id ?? `nb-${a.id}`;
-      if (!byBatch.has(key))
-        byBatch.set(key, { id: a.batch_id, name: a.batch_name || '—', count: a.student_count, cells: {}, extra: {} });
-      // One session leads each cell. An approved session always wins over a
-      // tutor's pending request for the same slot — the live grid stays truthful,
-      // and the request is still visible (and decidable) under Approvals. Any
-      // further sessions in the same cell (e.g. an additional faculty on the
-      // same class) land in `extra` and render as "+ name" lines underneath.
-      const row = byBatch.get(key);
-      const prev = row.cells[a.time_slot_id];
-      if (!prev) row.cells[a.time_slot_id] = a;
-      else if (prev.status === 'pending' && a.status !== 'pending') {
-        row.cells[a.time_slot_id] = a;
-        (row.extra[a.time_slot_id] ??= []).push(prev);
-      } else {
-        (row.extra[a.time_slot_id] ??= []).push(a);
-      }
-    }
-    return { batches: [...byBatch.values()] };
-  }, [data, programId, slotIds]);
+  const batches = useMemo(
+    () => buildRows(data.allocations, programId, slotIds),
+    [data, programId, slotIds]
+  );
 
   // faculty present in the current day/program, for the filter dropdown
   const facultyOptions = useMemo(() => {
@@ -221,6 +204,40 @@ export default function Timetable() {
       setGenerating(false);
     }
   }
+
+  // Print every program's timetable for the day as one document (one program
+  // per page), so a single "Save as PDF" covers the whole academy.
+  async function printAll() {
+    setPrinting(true);
+    try {
+      const sets = await Promise.all(programs.map(async (p) => {
+        const [{ data: ps }, { data: day }] = await Promise.all([
+          api.get(`/slots?program_id=${p.id}`),
+          api.get(`/allocations?date=${date}&program_id=${p.id}`),
+        ]);
+        // pending requests never go on paper
+        const approved = day.allocations.filter((a) => a.status !== 'pending');
+        return { program: p, slots: ps, rows: buildRows(approved, p.id, new Set(ps.map((s) => s.id))) };
+      }));
+      const withSessions = sets.filter((s) => s.rows.length);
+      if (!withSessions.length) toast('No sessions to print on this day', 'error');
+      else setPrintData(withSessions);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not load the timetables to print', 'error');
+    } finally {
+      setPrinting(false);
+    }
+  }
+
+  // Open the print dialog once the combined timetables have rendered, and
+  // drop them again when it closes.
+  useEffect(() => {
+    if (!printData) return;
+    const done = () => setPrintData(null);
+    window.addEventListener('afterprint', done);
+    const t = setTimeout(() => window.print(), 50);
+    return () => { clearTimeout(t); window.removeEventListener('afterprint', done); };
+  }, [printData]);
 
   // Delete every session of the current program on the selected day.
   async function clearDay() {
@@ -494,7 +511,7 @@ export default function Timetable() {
   }
 
   return (
-    <div className="page">
+    <div className={'page' + (printData ? ' printing-all' : '')}>
       <div className="row controls" style={{ marginBottom: 12 }}>
         <div className="tabs">
           {programs.map((p) => (
@@ -521,7 +538,12 @@ export default function Timetable() {
           </select>
         </label>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <button className="btn ghost" onClick={() => window.print()}>Print</button>
+        <button className="btn ghost" onClick={() => window.print()}
+          title="Print this program's timetable">Print</button>
+        <button className="btn ghost" onClick={printAll} disabled={printing || !date}
+          title="Print every program's timetable for this day in one document (Save as PDF)">
+          {printing ? 'Preparing…' : '🖨 Print all'}
+        </button>
         {canEdit && <EmailSchedules date={date} />}
         {canEdit && (undoStack.length > 0 || redoStack.length > 0) && (
           <>
@@ -777,6 +799,40 @@ export default function Timetable() {
           </tbody>
         </table>
       </div>
+
+      {printData && (
+        <div className="print-all">
+          {printData.map(({ program, slots: ps, rows }) => (
+            <section key={program.id} className="print-prog">
+              <h2 className="print-title">
+                {program.code} TIMETABLE ({date.split('-').reverse().join('/')})
+              </h2>
+              <table className="tt">
+                <thead>
+                  <tr>
+                    <th className="batch">Batch</th>
+                    {ps.map((s) => <th key={s.id}>{s.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((b) => (
+                    <tr key={b.id ?? b.name}>
+                      <td className="batch">
+                        {b.name}{b.count ? <span className="room"> ({b.count})</span> : null}
+                      </td>
+                      {ps.map((s) => (
+                        <td key={s.id}>
+                          {b.cells[s.id] && <PrintCell a={b.cells[s.id]} extras={b.extra?.[s.id] || []} />}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ))}
+        </div>
+      )}
 
       {editing && (
         <AllocationModal
@@ -1051,6 +1107,62 @@ function highlight(a) {
 }
 
 const isHighlighted = (a) => Boolean(highlight(a));
+
+// Batch rows × slot columns for one program's day. Only rows for that program
+// and its current slot grid are kept, so another program's sessions can never
+// render as blank "—" rows.
+function buildRows(allocations, programId, slotIds) {
+  const byBatch = new Map();
+  for (const a of allocations) {
+    if (programId && a.program_id !== programId) continue;      // other program leaked in
+    if (slotIds.size && !slotIds.has(a.time_slot_id)) continue; // slot not in this grid
+    const key = a.batch_id ?? `nb-${a.id}`;
+    if (!byBatch.has(key))
+      byBatch.set(key, { id: a.batch_id, name: a.batch_name || '—', count: a.student_count, cells: {}, extra: {} });
+    // One session leads each cell. An approved session always wins over a
+    // tutor's pending request for the same slot — the live grid stays truthful,
+    // and the request is still visible (and decidable) under Approvals. Any
+    // further sessions in the same cell (e.g. an additional faculty on the
+    // same class) land in `extra` and render as "+ name" lines underneath.
+    const row = byBatch.get(key);
+    const prev = row.cells[a.time_slot_id];
+    if (!prev) row.cells[a.time_slot_id] = a;
+    else if (prev.status === 'pending' && a.status !== 'pending') {
+      row.cells[a.time_slot_id] = a;
+      (row.extra[a.time_slot_id] ??= []).push(prev);
+    } else {
+      (row.extra[a.time_slot_id] ??= []).push(a);
+    }
+  }
+  return [...byBatch.values()];
+}
+
+// A read-only grid cell for "Print all".
+function PrintCell({ a, extras }) {
+  return (
+    <div className={'cell' + (highlight(a) ? ' tinted' : '')} style={highlight(a)}>
+      <div className="act">
+        {a.activity_code || ''}{' '}
+        {a.note && (a.activity_code || a.faculty_name) && (
+          <span className="note" style={noteStyle(a)}>{a.note}</span>
+        )}
+      </div>
+      {a.faculty_name && <div className="fac">{a.faculty_name}</div>}
+      {a.room_code && <div className="room">{a.room_code}</div>}
+      {!a.activity_code && !a.faculty_name && <div className="room">{a.raw_text || a.note}</div>}
+      {extras.map((x) => {
+        const label = x.faculty_name || x.activity_code || x.raw_text || x.note;
+        if (!label) return null;
+        return (
+          <div key={x.id} className={'fac extra' + (highlight(x) ? ' tinted' : '')} style={highlight(x)}>
+            + {label}
+            {x.note && x.note !== label && <span className="note" style={noteStyle(x)}>{x.note}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // A short human label for a session cell: activity / faculty / room, falling
 // back to the raw imported text.
