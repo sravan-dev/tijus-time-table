@@ -217,18 +217,20 @@ export async function applySheet(row, { date, program_id = null, replace = false
   return { created: allocations.length, source: 'knowledge-base', sheet: row.title };
 }
 
-// The sheet to build `date` from: the one filed under that weekday, most
-// recently added first. Returns null when the Knowledge Base has no match, and
-// the caller falls back to copying an earlier day.
-export async function sheetForDate(date) {
+// The sheets to try when building `date`, best first: those filed under that
+// weekday, then sheets filed under no weekday (e.g. a program's own sheet that
+// holds for every day), most recently added first within each. The caller
+// takes the first that has sessions for the program, and falls back to copying
+// an earlier day when none does.
+export async function sheetsForDate(date) {
   const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
-  const [[row]] = await pool.query(
+  const [rows] = await pool.query(
     `SELECT * FROM kb_documents
-      WHERE weekday = ? AND parse_error IS NULL AND session_count > 0
-      ORDER BY created_at DESC LIMIT 1`,
+      WHERE (weekday = ? OR weekday IS NULL) AND parse_error IS NULL AND session_count > 0
+      ORDER BY weekday IS NULL, created_at DESC`,
     [weekday]
   );
-  return row || null;
+  return rows;
 }
 
 // POST /api/knowledge/reseed — reload the sheets shipped in the repo's

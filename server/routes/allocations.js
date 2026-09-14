@@ -4,7 +4,7 @@ import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { conflictsForDate } from '../services/conflicts.js';
 import { sendMail, scheduleEmail, sessionAssignedEmail } from '../services/mailer.js';
 import { getSettings } from '../services/settings.js';
-import { sheetForDate, applySheet } from './knowledge.js';
+import { sheetsForDate, applySheet } from './knowledge.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -126,9 +126,8 @@ router.post('/generate', requireEditor, async (req, res) => {
 
   // A Knowledge Base sheet beats a copied day: it is the pattern an admin
   // curated for this weekday. Its own failures (an unreadable sheet, nothing for
-  // this program) are not fatal — we simply fall through to the copy below.
-  const sheet = await sheetForDate(date);
-  if (sheet) {
+  // this program) are not fatal — we try the next sheet, then the copy below.
+  for (const sheet of await sheetsForDate(date)) {
     const applied = await applySheet(sheet, { date, program_id });
     if (!applied.error) return res.json(applied);
   }

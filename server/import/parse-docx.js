@@ -170,7 +170,8 @@ async function parseWithConn(conn, sheets, DRY) {
   const progByCode = Object.fromEntries(progRows.map((p) => [p.code, p.id]));
 
   const [slotRows] = await conn.query(
-    'SELECT id, program_id, label, sort_order FROM time_slots ORDER BY program_id, sort_order'
+    `SELECT id, program_id, label, sort_order, start_time, end_time
+       FROM time_slots ORDER BY program_id, sort_order`
   );
   const slotsByProg = {};
   for (const s of slotRows) (slotsByProg[s.program_id] ??= []).push(s);
@@ -294,9 +295,192 @@ async function parseWithConn(conn, sheets, DRY) {
     return ids;
   }
 
-  // ---- gather allocations ------------------------------------------------
+  // ---- German ---------------------------------------------------------------
+  // The German sheet is laid out by tutor, not by batch, and its columns don't
+  // line up with the German slot grid: the header carries blank spacer columns,
+  // the afternoon block has its own "tutor" column in front of the 2.00-5.00
+  // cell, and a mid-table sub-header row ("9:30-11.15 | 11:00-12:00 | …")
+  // re-times the columns for the rows beneath it. So columns are mapped onto
+  // slots by the times written in the header, and each session is filed under
+  // the German level it teaches (A1, A2, B1, B2 …) so the grid gets one row per
+  // level, with every tutor on that class listed in the cell.
   const allAllocs = [];
   const sample = [];
+
+  const actById = new Map(activities.map((a) => [a.id, a.up]));
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const toMin = (t) => {
+    if (t == null) return null;
+    const [h, m] = String(t).split(':').map(Number);
+    return Number.isFinite(h) ? h * 60 + (m || 0) : null;
+  };
+  const cellText = (c) => (c?.lines.join(' ') || '').replace(/\s+/g, ' ').trim();
+
+  // "9.15-11.15", "11:00-12:00", "11.15 -11.30" -> minutes since midnight.
+  // The sheet writes afternoon hours as 1-7, so those are pm.
+  function parseRange(text) {
+    const m = String(text).replace(/\s+/g, '')
+      .match(/^(\d{1,2})[.:](\d{2})-(\d{1,2})[.:](\d{2})$/);
+    if (!m) return null;
+    const at = (h, mi) => { h = Number(h); return (h < 8 ? h + 12 : h) * 60 + Number(mi); };
+    return { start: at(m[1], m[2]), end: at(m[3], m[4]), label: `${m[1]}.${m[2]}-${m[3]}.${m[4]}` };
+  }
+
+  // The slot a sheet column belongs to: the one it overlaps most.
+  function slotForRange(range, slots) {
+    let best = null;
+    let bestOverlap = 0;
+    for (const s of slots) {
+      const a = toMin(s.start_time), b = toMin(s.end_time);
+      if (a == null || b == null) continue;
+      const overlap = Math.min(b, range.end) - Math.max(a, range.start);
+      if (overlap > bestOverlap) { bestOverlap = overlap; best = s; }
+    }
+    return best || slots.find((s) => parseRange(s.label)?.label === range.label) || null;
+  }
+
+  // Grid position -> { slot, range } for a header row. A column whose header
+  // isn't a time is null (a spacer, or the afternoon tutor column). `base` is
+  // the mapping a sub-header refines: columns it leaves blank keep theirs.
+  function columnMap(cells, slots, base = null) {
+    const map = base ? [...base] : [];
+    let pos = 0;
+    for (let ci = 0; ci < cells.length; ci++) {
+      const span = cells[ci].span || 1;
+      const range = ci === 0 ? null : parseRange(cellText(cells[ci]));
+      const slot = range ? slotForRange(range, slots) : null;
+      for (let k = 0; k < span; k++) {
+        if (slot) map[pos + k] = { slot, range };
+        else if (!base) map[pos + k] = null;
+      }
+      pos += span;
+    }
+    return map;
+  }
+
+  const NOT_A_TUTOR = new Set(['TUTOR', 'NAME', 'AND', 'VIDEO', 'BREAK', 'LUNCH']);
+  // Every tutor named in a cell ("HARIJA SNEHA", "ATHUL,SNEHA | ADITHYA"), in
+  // the order the sheet lists them so the first-named tutor leads the cell:
+  // known faculty by name, and each remaining word as a tutor to create.
+  async function tutorsIn(text) {
+    const up = text.toUpperCase();
+    const found = [];                       // [position in text, faculty id]
+    let rest = up;
+    for (const id of parseFaculty(text)) {
+      for (const [name, fid] of facByUpper) {
+        if (fid !== id) continue;
+        const re = new RegExp('\\b' + escapeRe(name) + '\\b', 'g');
+        const m = re.exec(up);
+        if (!m) continue;
+        found.push([m.index, id]);
+        rest = rest.replace(new RegExp('\\b' + escapeRe(name) + '\\b', 'g'), (s) => ' '.repeat(s.length));
+        break;
+      }
+    }
+    for (const m of rest.matchAll(/[A-Z]+/g)) {
+      if (m[0].length < 3 || NOT_A_TUTOR.has(m[0])) continue;
+      found.push([m.index, await getFacultyId(m[0])]);
+    }
+    const ids = [];
+    for (const [, id] of found.sort((a, b) => a[0] - b[0])) if (!ids.includes(id)) ids.push(id);
+    return ids;
+  }
+
+  const levelOf = (text) => (text.toUpperCase().match(/\b([ABC][12])\b/) || [])[1] || null;
+
+  // The German batch for a level: an existing one whose name carries it
+  // ("German A1 (Morning)"), or a new "German A1".
+  async function germanBatchId(programId, level) {
+    if (!level) return null;
+    const key = programId + '|level|' + level;
+    if (batchCache.has(key)) return batchCache.get(key);
+    const re = new RegExp('\\b' + level + '\\b', 'i');
+    const found = batchRows
+      .filter((b) => b.program_id === programId && re.test(b.name))
+      .sort((a, b) => a.name.length - b.name.length)[0];
+    let id = found?.id;
+    if (!found) {
+      const name = `German ${level}`;
+      if (DRY) id = fakeId--;
+      else {
+        const [r] = await conn.query(
+          'INSERT INTO batches (name, program_id, student_count, home_room_id, exam_month) VALUES (?, ?, 0, NULL, NULL)',
+          [name, programId]
+        );
+        id = r.insertId;
+      }
+      batchRows.push({ id, name, program_id: programId, home_room_id: null, exam_month: null });
+      newBatches.push(name);
+    }
+    batchCache.set(key, id);
+    return id;
+  }
+
+  async function parseGermanTable(rows, programId, slots, isoDate) {
+    let colMap = columnMap(rows[0] || [], slots);
+    for (let ri = 1; ri < rows.length; ri++) {
+      const cells = rows[ri];
+      if (!cells.length) continue;
+      const label = cellText(cells[0]);
+      const texts = cells.map(cellText);
+
+      // a sub-header re-times the columns for the rows below it
+      if (!label && texts.slice(1).some((t) => parseRange(t))) {
+        colMap = columnMap(cells, slots, colMap);
+        continue;
+      }
+      if (/^(SHOOT|LIVE|ONLINE|DEMO|INTERVIEW|MEETING|PRE|CON|BREAK|LUNCH|VIDEO)/i.test(label))
+        continue;
+
+      let tutors = label ? await tutorsIn(label) : [];
+      // a cell that names no level (LISTENING, READING …) teaches the row's level
+      const rowLevel = texts.slice(1).map(levelOf).find(Boolean) || null;
+
+      let pos = 0;
+      for (let ci = 0; ci < cells.length; ci++) {
+        const at = pos;
+        pos += cells[ci].span || 1;
+        const text = texts[ci];
+        if (ci === 0 || !text) continue;
+        if (/^(BREAK|LUNCH BREAK|LUNCH)$/i.test(text)) continue;
+
+        const col = colMap[at];
+        if (!col) {                        // the afternoon tutor column
+          tutors = await tutorsIn(text);
+          continue;
+        }
+
+        const activityId = matchActivity(text);
+        const code = activityId ? actById.get(activityId) : null;
+        // what the session is, minus a leading activity code the grid already shows
+        const detail = code
+          ? text.replace(new RegExp('^' + escapeRe(code) + '\\b\\s*', 'i'), '')
+          : text;
+        // a column the sub-header re-timed keeps its real time in the note
+        const retimed = col.range.start !== toMin(col.slot.start_time)
+          || col.range.end !== toMin(col.slot.end_time);
+        const note = [retimed ? col.range.label : null, detail].filter(Boolean).join(' ') || null;
+        const batchId = await germanBatchId(programId, levelOf(text) || rowLevel);
+
+        for (const facultyId of tutors.length ? tutors : [null]) {
+          allAllocs.push({
+            alloc_date: isoDate,
+            program_id: programId,
+            batch_id: batchId,
+            activity_id: activityId,
+            time_slot_id: col.slot.id,
+            classroom_id: null,
+            faculty_id: facultyId,
+            student_count: null,
+            raw_text: text.slice(0, 255),
+            note: note ? note.slice(0, 255) : null,
+          });
+        }
+      }
+    }
+  }
+
+  // ---- gather allocations ------------------------------------------------
 
   for (const sheet of sheets) {
     const isoDate = sheet.date;
@@ -309,6 +493,10 @@ async function parseWithConn(conn, sheets, DRY) {
       const programId = progByCode[progCode];
       const slots = slotsByProg[programId] || [];
       if (!slots.length) continue;
+      if (progCode === 'GERMAN') {
+        await parseGermanTable(rows, programId, slots, isoDate);
+        continue;
+      }
 
       // The new standard grid dropped the historical "1.10-2.00" column (an
       // always-empty lunch slot). The docx files still carry it, so locate it
@@ -335,19 +523,7 @@ async function parseWithConn(conn, sheets, DRY) {
         const label = (cells[0].lines.join(' ') || '').replace(/\s+/g, ' ').trim();
         if (!label) continue;
 
-        // German table: col0 is the tutor, not a batch
-        const isGerman = progCode === 'GERMAN';
-        let batchId = null;
-        let rowFacultyId = null;
-        if (isGerman) {
-          // skip non-tutor rows (shoot/live/online/section headers)
-          if (/^(SHOOT|LIVE|ONLINE|DEMO|INTERVIEW|MEETING|PRE|CON|BREAK|LUNCH)/i.test(label))
-            continue;
-          const fac = parseFaculty(label);
-          rowFacultyId = fac[0] || (await getFacultyId(label.toUpperCase()));
-        } else {
-          batchId = await getBatchId(programId, label);
-        }
+        const batchId = await getBatchId(programId, label);
 
         // walk columns honouring gridSpan
         let col = 0;
@@ -369,7 +545,7 @@ async function parseWithConn(conn, sheets, DRY) {
           const room = extractRoom(cellText);
           const roomId = await getRoomId(room);
           const facIds = parseFaculty(cellText);
-          const facultyId = facIds[0] || rowFacultyId || null;
+          const facultyId = facIds[0] || null;
           const activityId = matchActivity(cellText);
 
           const alloc = {
@@ -385,7 +561,7 @@ async function parseWithConn(conn, sheets, DRY) {
             note: facIds.length > 1 ? 'faculty: ' + facIds.map((i) => facById.get(i) || i).join(', ') : null,
           };
           allAllocs.push(alloc);
-          if (sample.length < 12 && !isGerman && progCode !== 'FLUENCY')
+          if (sample.length < 12 && progCode !== 'FLUENCY')
             sample.push({ date: isoDate, prog: progCode, batch: label.slice(0, 22), slot: slot.label, raw: cellText.slice(0, 40), room, fac: facIds.map((i) => facById.get(i)) });
         }
       }

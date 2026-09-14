@@ -134,7 +134,9 @@ export default function KnowledgeBase() {
         <p>
           These are the reference timetable sheets the generator learns from. Each sheet is filed
           under a weekday; when someone generates an empty day, the sheet for that weekday is
-          re-read and its sessions are created for the new date. Tutors, rooms and batches a sheet
+          re-read and its sessions are created for the new date. A sheet set to &ldquo;Not a day
+          sheet&rdquo; (such as the German timetable) is used for any day whose weekday sheet has
+          nothing for that program. Tutors, rooms and batches a sheet
           mentions but the system doesn&apos;t know yet are created as it runs.
         </p>
         {!!missing.length && (
