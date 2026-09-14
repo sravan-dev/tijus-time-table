@@ -43,6 +43,9 @@ export default function Timetable() {
   // Right-click batch edit/create: { batchId } to edit, { placement } to insert
   // a new row above/below an existing one, {} to append at the end.
   const [editingBatch, setEditingBatch] = useState(null);
+  // Column copied with "Copy column": { date, slot:{id,label}, programId, count }.
+  // Kept across date changes so a column can be pasted onto another day.
+  const [columnClip, setColumnClip] = useState(null);
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -246,6 +249,48 @@ export default function Timetable() {
       toast(activity ? 'Activity removed' : 'Session cleared');
     } catch (e) {
       toast(e.response?.data?.error || 'Could not clear the session', 'error');
+    }
+  }
+
+  // Approved sessions of this program in a time-slot column on screen.
+  function columnSessions(slotId) {
+    return data.allocations.filter((a) =>
+      a.program_id === programId && a.time_slot_id === slotId && a.status !== 'rejected');
+  }
+
+  // Whether the column menu would offer anything: a copy, or a paste target.
+  function hasColumnAction(slotId) {
+    const n = columnSessions(slotId).length;
+    return n > 0 || Boolean(columnClip && columnClip.programId === programId);
+  }
+
+  // Remember a whole column (every batch's session in one time slot).
+  function copyColumn(slot) {
+    const count = columnSessions(slot.id).filter((a) => a.status === 'approved').length;
+    if (!count) { toast('That column has no sessions to copy', 'error'); return; }
+    setColumnClip({ date, slot: { id: slot.id, label: slot.label }, programId, count });
+    toast(`Copied ${count} session(s) from ${slot.label} — right-click an empty column to paste`);
+  }
+
+  // Paste the copied column into an empty one (this day or another).
+  async function pasteColumn(slot) {
+    const clip = columnClip;
+    if (!clip || clip.programId !== programId) return;
+    if (columnSessions(slot.id).length) {
+      toast('That column already has sessions — paste into an empty column', 'error');
+      return;
+    }
+    try {
+      const { data: r } = await api.post('/allocations/copy-column', {
+        program_id: programId,
+        source_date: clip.date, source_slot_id: clip.slot.id,
+        date, time_slot_id: slot.id,
+      });
+      await refreshDates();
+      await reload();
+      toast(`Pasted ${r.created} session(s) into ${slot.label}`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not paste the column', 'error');
     }
   }
 
@@ -480,8 +525,13 @@ export default function Timetable() {
               {slots.map((s) => (
                 <th key={s.id}
                   className={canEdit ? 'slot-edit' : undefined}
-                  title={canEdit ? 'Click to edit this timing' : undefined}
-                  onClick={() => canEdit && setEditingSlot(s)}>
+                  title={canEdit ? 'Click to edit this timing · Right-click to copy / paste the column' : undefined}
+                  onClick={() => canEdit && setEditingSlot(s)}
+                  onContextMenu={(e) => {
+                    if (!canEdit || !hasColumnAction(s.id)) return;
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, slot: s });
+                  }}>
                   {s.label}
                 </th>
               ))}
@@ -588,11 +638,11 @@ export default function Timetable() {
                         )}
                         onContextMenu={(e) => {
                           if (!canEdit) return;                 // admins only
-                          if (!a && !cellRef) return;           // nothing to act on
+                          if (!a && !cellRef && !hasColumnAction(s.id)) return; // nothing to act on
                           e.preventDefault();
                           // An empty cell still gets a menu, so an activity can
                           // be dropped straight into a free slot.
-                          setMenu({ x: e.clientX, y: e.clientY, allocation: a, cell: cellRef });
+                          setMenu({ x: e.clientX, y: e.clientY, allocation: a, cell: cellRef, slot: s });
                         }}>
                         {a ? (
                           <>
@@ -644,7 +694,7 @@ export default function Timetable() {
                                     // `cell` as well as the session itself: once a
                                     // cell is full these lines cover it, and the
                                     // menu still has to be able to add to it.
-                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef });
+                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef, slot: s });
                                   }}>
                                   {label ? `+ ${label}` : <span className="empty-area">+ activity</span>}
                                   {x.note && label && x.note !== label && (
@@ -814,6 +864,25 @@ export default function Timetable() {
                     onClick={() => { const a = menu.allocation; setMenu(null); clearSession(a); }}>
                     {isHighlighted(menu.allocation) ? 'Remove activity' : 'Clear session'}
                   </button>
+                )}
+                {menu.slot && (
+                  <>
+                    {(menu.allocation || menu.cell) && <div className="ctx-sep" />}
+                    {columnSessions(menu.slot.id).length > 0 && (
+                      <button className="ctx-item"
+                        onClick={() => { const s = menu.slot; setMenu(null); copyColumn(s); }}>
+                        Copy column ({menu.slot.label})
+                      </button>
+                    )}
+                    {columnClip && columnClip.programId === programId
+                      && !columnSessions(menu.slot.id).length && (
+                      <button className="ctx-item"
+                        onClick={() => { const s = menu.slot; setMenu(null); pasteColumn(s); }}>
+                        Paste column ({columnClip.slot.label}
+                        {columnClip.date !== date ? `, ${fmt(columnClip.date)}` : ''})
+                      </button>
+                    )}
+                  </>
                 )}
               </>
             )}

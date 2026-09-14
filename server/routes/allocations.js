@@ -159,6 +159,43 @@ router.post('/generate', requireEditor, async (req, res) => {
   res.json({ created: r.affectedRows, source: 'previous-day', source_date: source });
 });
 
+// POST /api/allocations/copy-column
+//   { program_id, source_date, source_slot_id, date, time_slot_id }
+// Pastes every session of one time-slot column (all batches) into another
+// column, on the same day or a different one. Only approved sessions are
+// copied — a tutor's pending request is theirs, not part of the timetable.
+// Refuses when the target column already has sessions, so a paste never
+// stacks onto or muddles an existing column.
+router.post('/copy-column', requireEditor, async (req, res) => {
+  const { program_id, source_date, source_slot_id, date, time_slot_id } = req.body || {};
+  if (!program_id || !source_date || !source_slot_id || !date || !time_slot_id)
+    return res.status(400).json({ error: 'program_id, source_date, source_slot_id, date and time_slot_id are required' });
+  if (source_date === date && Number(source_slot_id) === Number(time_slot_id))
+    return res.status(400).json({ error: 'Pick a different column to paste into' });
+
+  const [[existing]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM allocations
+      WHERE alloc_date = ? AND program_id = ? AND time_slot_id = ? AND status <> 'rejected'`,
+    [date, program_id, time_slot_id]
+  );
+  if (existing.n)
+    return res.status(409).json({ error: 'That column already has sessions — clear it first' });
+
+  const [r] = await pool.query(
+    `INSERT INTO allocations (alloc_date, program_id, batch_id, activity_id, time_slot_id,
+                              classroom_id, faculty_id, student_count, raw_text, note,
+                              text_color, bg_color, note_text_color, note_bg_color)
+     SELECT ?, program_id, batch_id, activity_id, ?,
+            classroom_id, faculty_id, student_count, raw_text, note,
+            text_color, bg_color, note_text_color, note_bg_color
+       FROM allocations
+      WHERE alloc_date = ? AND program_id = ? AND time_slot_id = ? AND status = 'approved'
+      ORDER BY id`,
+    [date, time_slot_id, source_date, program_id, source_slot_id]
+  );
+  res.json({ created: r.affectedRows });
+});
+
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
   'time_slot_id', 'classroom_id', 'faculty_id', 'student_count', 'note',
   'text_color', 'bg_color', 'note_text_color', 'note_bg_color'];

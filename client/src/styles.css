@@ -272,6 +272,7 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
   padding: 8px 10px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--ink);
 }
 .ctx-item:hover { background: var(--brand-tint); }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 2px; }
 .ctx-item.danger { color: var(--error); }
 .ctx-item.danger:hover { background: var(--error-bg); }
 .field { margin-bottom: 12px; display:flex; flex-direction:column; gap:4px; }
