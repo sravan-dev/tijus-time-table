@@ -16,7 +16,7 @@ export default function Schedule() {
     api.get('/schedule/room-blocks').then((r) => setBlocks(r.data));
   };
   useEffect(() => {
-    api.get('/faculty').then((r) => setFaculty(r.data));
+    api.get('/faculty').then((r) => setFaculty(r.data.filter((f) => f.active)));
     api.get('/classrooms').then((r) => setRooms(r.data));
     load();
   }, []);

@@ -128,10 +128,20 @@ function Faculty() {
       toast(e.response?.data?.error || 'Update failed', 'error');
     }
   }
+  async function toggleActive(f) {
+    try {
+      await api.put(`/faculty/${f.id}`, { ...f, active: f.active ? 0 : 1 });
+      load();
+      toast(f.active ? `${f.name} marked inactive` : `${f.name} marked active`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Update failed', 'error');
+    }
+  }
+  const activeCount = rows.filter((f) => f.active).length;
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-        <b>Faculty ({rows.length})</b>
+        <b>Faculty ({activeCount} active{rows.length > activeCount ? `, ${rows.length - activeCount} inactive` : ''})</b>
         {canEdit && <button className="btn sm" onClick={add}>+ Add</button>}
       </div>
       <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
@@ -149,7 +159,11 @@ function Faculty() {
                     onBlur={(e) => saveEmail(f, e.target.value.trim())} />
                 ) : (f.email || '—')}
               </td>
-              <td>{f.active ? 'Yes' : 'No'}</td>
+              <td>
+                {canEdit ? (
+                  <input type="checkbox" checked={!!f.active} onChange={() => toggleActive(f)} />
+                ) : (f.active ? 'Yes' : 'No')}
+              </td>
             </tr>
           ))}
         </tbody>

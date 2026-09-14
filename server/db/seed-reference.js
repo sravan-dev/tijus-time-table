@@ -21,15 +21,13 @@ const CLASSROOMS = [
 ];
 
 // ---- Faculty (normalised; Suchitra/Suchithra & Besty/Betsy treated as one) -
+// Current staff roster (Sep 2026). Former tutors stay in live databases as
+// inactive so their past sessions keep a name.
 const FACULTY = [
-  // OET
-  'Deepthy', 'Suchithra', 'Haritha', 'Radhakrishnan', 'Gangalekshmi',
-  'Goldy', 'Varsha', 'Vishnu', 'Anju', 'Amiya',
-  // IELTS / PTE
-  'Krishnanunni', 'Betsy', 'Akhila', 'Rissy', 'Stan', 'Farzana',
-  'Tintu', 'Jeslin', 'Ann',
-  // German
-  'Abin', 'Sneha', 'Krishnendu', 'Revathy', 'Archana', 'Akash', 'Athul',
+  'Reshma', 'Varsha', 'Suchithra', 'Vishnu', 'Haritha', 'Amiya', 'Gangalekshmi',
+  'Goldy', 'Ann', 'Diya', 'Akhila', 'Tintu', 'Manu', 'Ann Rose', 'Arunima',
+  'Farzana', 'Stan', 'Rissy', 'Sneha', 'Athul', 'Arjun', 'Bhagya', 'Harija',
+  'Adithya', 'Jissal', 'Chandhini',
 ];
 
 // ---- Faculty capabilities (from "TUTORS & MODULE" sheet) ------------------

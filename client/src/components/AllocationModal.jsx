@@ -106,7 +106,9 @@ export default function AllocationModal({ initial, programId, date, onClose, onS
           <label>Faculty</label>
           <select value={form.faculty_id} onChange={set('faculty_id')}>
             <option value="">—</option>
-            {refs.faculty.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            {refs.faculty
+              .filter((f) => f.active || String(f.id) === String(form.faculty_id))
+              .map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </div>
         <div className="field">

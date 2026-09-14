@@ -25,7 +25,7 @@ export default function ReassignModal({ allocation, programId, date, mode = 'rea
   // (the table may not exist on a DB that hasn't run db:migrate), and must
   // never block the faculty list from loading.
   useEffect(() => {
-    api.get('/faculty').then(({ data }) => setFaculty(data)).catch(() => setFaculty([]));
+    api.get('/faculty').then(({ data }) => setFaculty(data.filter((f) => f.active))).catch(() => setFaculty([]));
     api.get(`/capabilities?program_id=${programId}`)
       .then(({ data }) => setCaps(data))
       .catch(() => setCaps(null));
