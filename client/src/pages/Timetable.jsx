@@ -78,7 +78,7 @@ export default function Timetable() {
       setProgramId((match || progs[0])?.id);
       const isoDates = ds.map((d) => d.slice(0, 10));
       setDates(isoDates);
-      setDate(isoDates[0] || '');
+      setDate(todayIso());   // open on today's timetable, even if it's still empty
     })();
   }, []);
 
@@ -483,7 +483,10 @@ export default function Timetable() {
         </label>
         <label>Date&nbsp;
           <select value={date} onChange={(e) => setDate(e.target.value)}>
-            {dates.map((d) => <option key={d} value={d}>{fmt(d)}</option>)}
+            {/* The chosen day may have no sessions yet (e.g. today), so make
+                sure it is still listed rather than the select showing another day. */}
+            {(date && !dates.includes(date) ? [...dates, date].sort() : dates)
+              .map((d) => <option key={d} value={d}>{fmt(d)}</option>)}
           </select>
         </label>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -1048,6 +1051,14 @@ function ConflictSummary({ conflicts }) {
       ))}
     </ul>
   );
+}
+
+// Today as YYYY-MM-DD in the browser's local time zone (not UTC, which would
+// still be yesterday early in the morning in India).
+function todayIso() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function fmt(iso) {
