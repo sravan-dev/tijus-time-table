@@ -46,6 +46,8 @@ export default function Timetable() {
   // Column copied with "Copy column": { date, slot:{id,label}, programId, count }.
   // Kept across date changes so a column can be pasted onto another day.
   const [columnClip, setColumnClip] = useState(null);
+  // Single cell copied with "Copy cell": { date, slot:{id,label}, batch:{id,name}, programId }.
+  const [cellClip, setCellClip] = useState(null);
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -291,6 +293,35 @@ export default function Timetable() {
       toast(`Pasted ${r.created} session(s) into ${slot.label}`);
     } catch (e) {
       toast(e.response?.data?.error || 'Could not paste the column', 'error');
+    }
+  }
+
+  // Remember one cell (its session and anything added under it).
+  function copyCell(cell) {
+    setCellClip({
+      date, programId,
+      slot: { id: cell.time_slot_id, label: cell.slot_label },
+      batch: { id: cell.batch_id, name: cell.batch_name },
+    });
+    toast(`Copied ${cell.batch_name} · ${cell.slot_label} — right-click an empty cell to paste`);
+  }
+
+  // Paste the copied cell into an empty cell (this day or another).
+  async function pasteCell(cell) {
+    const clip = cellClip;
+    if (!clip || clip.programId !== programId) return;
+    try {
+      const { data: r } = await api.post('/allocations/copy-column', {
+        program_id: programId,
+        source_date: clip.date, source_slot_id: clip.slot.id, source_batch_id: clip.batch.id,
+        date, time_slot_id: cell.time_slot_id, batch_id: cell.batch_id,
+      });
+      await refreshDates();
+      await reload();
+      toast(r.created ? `Pasted into ${cell.batch_name} · ${cell.slot_label}`
+        : 'The copied cell is empty now — nothing pasted', r.created ? undefined : 'error');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not paste the cell', 'error');
     }
   }
 
@@ -871,6 +902,20 @@ export default function Timetable() {
                 {menu.slot && (
                   <>
                     {(menu.allocation || menu.cell) && <div className="ctx-sep" />}
+                    {menu.cell?.occupied && (
+                      <button className="ctx-item"
+                        onClick={() => { const c = menu.cell; setMenu(null); copyCell(c); }}>
+                        Copy cell
+                      </button>
+                    )}
+                    {menu.cell && !menu.cell.occupied
+                      && cellClip && cellClip.programId === programId && (
+                      <button className="ctx-item"
+                        onClick={() => { const c = menu.cell; setMenu(null); pasteCell(c); }}>
+                        Paste cell ({cellClip.batch.name} · {cellClip.slot.label}
+                        {cellClip.date !== date ? `, ${fmt(cellClip.date)}` : ''})
+                      </button>
+                    )}
                     {columnSessions(menu.slot.id).length > 0 && (
                       <button className="ctx-item"
                         onClick={() => { const s = menu.slot; setMenu(null); copyColumn(s); }}>

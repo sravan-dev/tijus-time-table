@@ -160,38 +160,49 @@ router.post('/generate', requireEditor, async (req, res) => {
 });
 
 // POST /api/allocations/copy-column
-//   { program_id, source_date, source_slot_id, date, time_slot_id }
+//   { program_id, source_date, source_slot_id, date, time_slot_id,
+//     source_batch_id?, batch_id? }
 // Pastes every session of one time-slot column (all batches) into another
-// column, on the same day or a different one. Only approved sessions are
-// copied — a tutor's pending request is theirs, not part of the timetable.
-// Refuses when the target column already has sessions, so a paste never
-// stacks onto or muddles an existing column.
+// column, on the same day or a different one. With source_batch_id + batch_id
+// it copies a single cell instead (the cell's lead session and anything added
+// under it) into another cell. Only approved sessions are copied — a tutor's
+// pending request is theirs, not part of the timetable. Refuses when the
+// target already has sessions, so a paste never stacks onto existing ones.
 router.post('/copy-column', requireEditor, async (req, res) => {
-  const { program_id, source_date, source_slot_id, date, time_slot_id } = req.body || {};
+  const { program_id, source_date, source_slot_id, date, time_slot_id,
+    source_batch_id, batch_id } = req.body || {};
   if (!program_id || !source_date || !source_slot_id || !date || !time_slot_id)
     return res.status(400).json({ error: 'program_id, source_date, source_slot_id, date and time_slot_id are required' });
-  if (source_date === date && Number(source_slot_id) === Number(time_slot_id))
-    return res.status(400).json({ error: 'Pick a different column to paste into' });
+  const cell = source_batch_id != null || batch_id != null;
+  if (cell && (source_batch_id == null || batch_id == null))
+    return res.status(400).json({ error: 'source_batch_id and batch_id go together' });
+  if (source_date === date && Number(source_slot_id) === Number(time_slot_id)
+      && (!cell || Number(source_batch_id) === Number(batch_id)))
+    return res.status(400).json({ error: `Pick a different ${cell ? 'cell' : 'column'} to paste into` });
 
+  const batchWhere = cell ? ' AND batch_id = ?' : '';
   const [[existing]] = await pool.query(
     `SELECT COUNT(*) AS n FROM allocations
-      WHERE alloc_date = ? AND program_id = ? AND time_slot_id = ? AND status <> 'rejected'`,
-    [date, program_id, time_slot_id]
+      WHERE alloc_date = ? AND program_id = ? AND time_slot_id = ?${batchWhere} AND status <> 'rejected'`,
+    [date, program_id, time_slot_id, ...(cell ? [batch_id] : [])]
   );
   if (existing.n)
-    return res.status(409).json({ error: 'That column already has sessions — clear it first' });
+    return res.status(409).json({
+      error: `That ${cell ? 'cell' : 'column'} already has sessions — clear it first`,
+    });
 
   const [r] = await pool.query(
     `INSERT INTO allocations (alloc_date, program_id, batch_id, activity_id, time_slot_id,
                               classroom_id, faculty_id, student_count, raw_text, note,
                               text_color, bg_color, note_text_color, note_bg_color)
-     SELECT ?, program_id, batch_id, activity_id, ?,
+     SELECT ?, program_id, ${cell ? '?' : 'batch_id'}, activity_id, ?,
             classroom_id, faculty_id, student_count, raw_text, note,
             text_color, bg_color, note_text_color, note_bg_color
        FROM allocations
-      WHERE alloc_date = ? AND program_id = ? AND time_slot_id = ? AND status = 'approved'
+      WHERE alloc_date = ? AND program_id = ? AND time_slot_id = ?${batchWhere} AND status = 'approved'
       ORDER BY id`,
-    [date, time_slot_id, source_date, program_id, source_slot_id]
+    [date, ...(cell ? [batch_id] : []), time_slot_id,
+      source_date, program_id, source_slot_id, ...(cell ? [source_batch_id] : [])]
   );
   res.json({ created: r.affectedRows });
 });
