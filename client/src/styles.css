@@ -265,6 +265,7 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
 .ctx-menu {
   position: fixed; background: #fff; border: 1px solid var(--line); border-radius: 8px;
   box-shadow: 0 10px 30px rgba(15,23,42,.22); padding: 4px; min-width: 170px;
+  max-height: calc(100vh - 16px); overflow-y: auto;
 }
 .ctx-item {
   display: block; width: 100%; text-align: left; background: none; border: none;

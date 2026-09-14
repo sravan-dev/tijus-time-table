@@ -716,7 +716,20 @@ export default function Timetable() {
         <div className="ctx-backdrop"
           onClick={() => setMenu(null)}
           onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
-          <div className="ctx-menu" style={{ top: menu.y, left: menu.x }} onClick={(e) => e.stopPropagation()}>
+          <div className="ctx-menu" style={{ top: menu.y, left: menu.x }} onClick={(e) => e.stopPropagation()}
+            ref={(el) => {
+              // Keep the menu on screen: open it upward / leftward from the
+              // cursor when there isn't room below / to the right.
+              if (!el) return;
+              const pad = 8;
+              const { width, height } = el.getBoundingClientRect();
+              const vw = window.innerWidth, vh = window.innerHeight;
+              let top = menu.y, left = menu.x;
+              if (top + height > vh - pad) top = Math.max(pad, menu.y - height);
+              if (left + width > vw - pad) left = Math.max(pad, vw - width - pad);
+              el.style.top = `${top}px`;
+              el.style.left = `${left}px`;
+            }}>
             {menu.batch ? (
               <>
                 <button className="ctx-item"
