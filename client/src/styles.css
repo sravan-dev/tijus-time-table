@@ -161,7 +161,7 @@ table.tt td.batch, table.tt th.batch {
 }
 .cell .note[style], .act-preview .note[style] { font-style: normal; font-weight: 600; }
 /* an additional faculty (second session in the same cell) */
-.cell .fac.extra { border-top: 1px dashed var(--line); margin-top: 2px; padding-top: 2px; }
+.cell .fac.extra { border-top: 1px dashed var(--line); margin-top: 2px; padding-top: 2px; font-weight: 700; }
 .cell .fac.extra:hover { text-decoration: underline; }
 .cell.conf-error { background: var(--error-bg); outline: 1px solid var(--error); }
 .cell.conf-warn { background: var(--warn-bg); }

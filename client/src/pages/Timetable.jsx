@@ -881,7 +881,7 @@ export default function Timetable() {
                                     // menu still has to be able to add to it.
                                     setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef, slot: s });
                                   }}>
-                                  {label ? `+ ${label}` : <span className="empty-area">+ activity</span>}
+                                  {label || <span className="empty-area">+ activity</span>}
                                   {x.note && label && x.note !== label && (
                                     <span className="note" title={x.note} style={noteStyle(x)}>{x.note}</span>
                                   )}
@@ -1293,7 +1293,7 @@ function PrintCell({ a, extras }) {
         if (!label) return null;
         return (
           <div key={x.id} className={'fac extra' + (highlight(x) ? ' tinted' : '')} style={highlight(x)}>
-            + {label}
+            {label}
             {x.note && x.note !== label && <span className="note" style={noteStyle(x)}>{x.note}</span>}
           </div>
         );
