@@ -193,6 +193,16 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
   font-size: 12px; font-weight: 700; line-height: 14px; text-align: center;
 }
 .split-add:hover span { background: var(--brand-dark); }
+/* Excel-style fill handle on a cell's bottom-right corner */
+.fill-handle {
+  position: absolute; right: -4px; bottom: -4px; z-index: 2;
+  width: 9px; height: 9px; border: 1px solid #fff; background: var(--brand);
+  cursor: crosshair; opacity: 0; touch-action: none;
+}
+.cell:hover .fill-handle, .cell.fill-src .fill-handle { opacity: 1; }
+.cell.fill-src { outline: 2px solid var(--brand); }
+.cell.fill-range { outline: 2px dashed var(--brand); background: var(--brand-tint); }
+.page.filling, .page.filling * { cursor: crosshair !important; user-select: none; }
 /* a split area with nothing in it yet */
 .empty-area { opacity: .6; font-style: italic; }
 

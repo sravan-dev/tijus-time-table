@@ -48,6 +48,10 @@ export default function Timetable() {
   const [columnClip, setColumnClip] = useState(null);
   // Single cell copied with "Copy cell": { date, slot:{id,label}, batch:{id,name}, programId }.
   const [cellClip, setCellClip] = useState(null);
+  // Excel-style fill handle drag: { from:{row,col}, to:{row,col} } as indexes
+  // into the rows / slot columns on screen. Set only while dragging.
+  const [fill, setFill] = useState(null);
+  const fillRef = useRef(null);
   // Every program's grid for the day, loaded for "Print all":
   // [{ program, slots, rows }]. Set only while the print dialog is up.
   const [printData, setPrintData] = useState(null);
@@ -342,6 +346,115 @@ export default function Timetable() {
     }
   }
 
+  // Cells a fill drag covers, excluding the source. Like Excel it runs along
+  // one axis only: down/up a column or across a row, whichever is dragged further.
+  function fillTargets(f) {
+    if (!f) return [];
+    const dr = f.to.row - f.from.row, dc = f.to.col - f.from.col;
+    const out = [];
+    if (Math.abs(dr) >= Math.abs(dc)) {
+      const step = Math.sign(dr);
+      for (let r = f.from.row + step; step && r !== f.to.row + step; r += step)
+        out.push({ row: r, col: f.from.col });
+    } else {
+      const step = Math.sign(dc);
+      for (let c = f.from.col + step; c !== f.to.col + step; c += step)
+        out.push({ row: f.from.row, col: c });
+    }
+    return out;
+  }
+  const fillSet = useMemo(
+    () => new Set(fillTargets(fill).map((t) => `${t.row}:${t.col}`)), [fill]);
+
+  function startFill(e, row, col) {
+    e.preventDefault();       // no text selection, no native drag of the cell
+    e.stopPropagation();
+    const f = { from: { row, col }, to: { row, col } };
+    fillRef.current = f;
+    setFill(f);
+  }
+
+  // Track the pointer over the grid while a fill drag is on; release applies it.
+  useEffect(() => {
+    if (!fill) return;
+    function onMove(e) {
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-fill]');
+      if (!el || !fillRef.current) return;
+      const [row, col] = el.dataset.fill.split(':').map(Number);
+      const cur = fillRef.current;
+      if (cur.to.row === row && cur.to.col === col) return;
+      fillRef.current = { ...cur, to: { row, col } };
+      setFill(fillRef.current);
+    }
+    function onUp() {
+      const f = fillRef.current;
+      fillRef.current = null;
+      setFill(null);
+      runFill(f);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { fillRef.current = null; setFill(null); }
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [Boolean(fill)]);
+
+  // Copy the source cell into every empty cell `cells` names; occupied ones are
+  // left alone. Returns the cells actually filled and how many were skipped.
+  async function copyIntoCells(src, cells) {
+    const filled = [];
+    let skipped = 0;
+    for (const c of cells) {
+      if (batches.find((x) => x.id === c.batch_id)?.cells[c.time_slot_id]) { skipped++; continue; }
+      try {
+        const { data: r } = await api.post('/allocations/copy-column', {
+          program_id: programId,
+          source_date: date, source_slot_id: src.time_slot_id, source_batch_id: src.batch_id,
+          date, time_slot_id: c.time_slot_id, batch_id: c.batch_id,
+        });
+        if (r.created) filled.push(c);
+      } catch (e) {
+        if (e.response?.status === 409) skipped++;   // filled meanwhile / hidden by the faculty filter
+        else throw e;
+      }
+    }
+    return { filled, skipped };
+  }
+
+  async function runFill(f) {
+    const src = f && visibleBatches[f.from.row];
+    const srcSlot = f && slots[f.from.col];
+    if (!src?.id || !srcSlot || moving) return;
+    const cells = fillTargets(f)
+      .map(({ row, col }) => ({ batch_id: visibleBatches[row]?.id, time_slot_id: slots[col]?.id }))
+      .filter((c) => c.batch_id && c.time_slot_id);
+    if (!cells.length) return;
+    const from = { batch_id: src.id, time_slot_id: srcSlot.id };
+    setMoving(true);
+    try {
+      const { filled, skipped } = await copyIntoCells(from, cells);
+      await reload();
+      if (filled.length) {
+        setUndoStack((s) => [...s, { type: 'fill', src: from, cells: filled }]);
+        setRedoStack([]);
+      }
+      toast(filled.length
+        ? `Filled ${filled.length} cell(s)${skipped ? ` · skipped ${skipped} that already had sessions` : ''}`
+        : 'Nothing filled — those cells already have sessions', filled.length ? undefined : 'error');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not fill the cells', 'error');
+      await reload();
+    } finally {
+      setMoving(false);
+    }
+  }
+
   // Apply a list of position changes ({ id, batch_id, time_slot_id }) in order.
   async function applyPositions(changes) {
     for (const c of changes) {
@@ -457,10 +570,22 @@ export default function Timetable() {
         await api.delete(`/batches/${entry.batch.id}`);
       }
       await refreshDates();
+    } else if (entry.type === 'fill') {
+      if (dir === 'undo') {
+        // the filled cells were empty before, so undo empties them again
+        const ids = data.allocations
+          .filter((a) => a.program_id === programId && entry.cells.some((c) =>
+            c.batch_id === a.batch_id && c.time_slot_id === a.time_slot_id))
+          .map((a) => a.id);
+        for (const id of ids) await api.delete(`/allocations/${id}`);
+      } else {
+        await copyIntoCells(entry.src, entry.cells);
+      }
     }
   }
 
   function entryToast(entry, dir) {
+    if (entry.type === 'fill') return dir === 'undo' ? 'Fill undone' : 'Fill redone';
     if (entry.type === 'order') return dir === 'undo' ? 'Row order undone' : 'Row order redone';
     if (entry.type === 'batch-delete')
       return dir === 'undo' ? 'Batch restored' : 'Batch deleted again';
@@ -511,7 +636,7 @@ export default function Timetable() {
   }
 
   return (
-    <div className={'page' + (printData ? ' printing-all' : '')}>
+    <div className={'page' + (printData ? ' printing-all' : '') + (fill ? ' filling' : '')}>
       <div className="row controls" style={{ marginBottom: 12 }}>
         <div className="tabs">
           {programs.map((p) => (
@@ -594,7 +719,7 @@ export default function Timetable() {
             </tr>
           </thead>
           <tbody>
-            {visibleBatches.map((b) => (
+            {visibleBatches.map((b, ri) => (
               <tr key={b.id ?? b.name}
                 className={rowDragOver?.id === b.id ? 'row-drag-' + rowDragOver.pos : undefined}
                 onDragOver={(e) => {
@@ -633,7 +758,7 @@ export default function Timetable() {
                   }}>
                   {b.name}{b.count ? <span className="room"> ({b.count})</span> : null}
                 </td>
-                {slots.map((s) => {
+                {slots.map((s, ci) => {
                   const a = b.cells[s.id];
                   const extras = b.extra?.[s.id] || [];
                   const conf = a ? data.conflicts[a.id] : null;
@@ -653,13 +778,17 @@ export default function Timetable() {
                         className={'cell' + (level ? ' conf-' + level : '')
                           + (dragOver === cellKey ? ' drag-over' : '')
                           + (a?.status === 'pending' ? ' pending' : '')
-                          + (highlight(a) ? ' tinted' : '')}
+                          + (highlight(a) ? ' tinted' : '')
+                          + (fill && fill.from.row === ri && fill.from.col === ci ? ' fill-src' : '')
+                          + (fillSet.has(`${ri}:${ci}`) ? ' fill-range' : '')}
+                        data-fill={`${ri}:${ci}`}
                         style={highlight(a)}
                         title={a?.status === 'pending'
                           ? 'Requested by the tutor — awaiting approval'
                           : (conf ? conf.map((c) => c.message).join('\n') : '')}
                         draggable={Boolean(canEdit && a)}
                         onDragStart={(e) => {
+                          if (fillRef.current) { e.preventDefault(); return; } // fill handle, not a move
                           if (!canEdit || !a) return;
                           dragRef.current = a;
                           e.dataTransfer.effectAllowed = 'move';
@@ -774,6 +903,15 @@ export default function Timetable() {
                             onContextMenu={(e) => e.stopPropagation()}>
                             <span>+</span>
                           </button>
+                        )}
+                        {/* Excel-style fill handle: drag it across or down to
+                            copy this cell into the empty cells it passes over. */}
+                        {canEdit && a && cellRef && a.status === 'approved' && (
+                          <span className="fill-handle no-print"
+                            title="Drag across or down to copy this cell into empty cells"
+                            onPointerDown={(e) => startFill(e, ri, ci)}
+                            onClick={(e) => e.stopPropagation()}
+                            onContextMenu={(e) => e.stopPropagation()} />
                         )}
                       </div>
                     </td>
