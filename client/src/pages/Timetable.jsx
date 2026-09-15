@@ -192,7 +192,7 @@ export default function Timetable() {
   async function generateDay() {
     const prog = programs.find((p) => p.id === programId);
     if (!confirm(`Generate the ${prog?.code || ''} timetable for ${fmt(date)} ` +
-      'by copying the most recent matching day? You can edit the sessions afterwards.')) return;
+      'from the Knowledge Base sheets? You can edit the sessions afterwards.')) return;
     setGenerating(true);
     try {
       const { data: g } = await api.post('/allocations/generate', {

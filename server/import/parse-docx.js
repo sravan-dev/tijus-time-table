@@ -100,6 +100,15 @@ function detectProgramsFromXml(xml) {
   return result;
 }
 
+// Whether a table's header row names time slots ("9.00-10.00", "1.10- 2.00"),
+// i.e. the table is a timetable grid. Two such columns are required.
+function hasTimeHeader(rows) {
+  const header = rows[0] || [];
+  const times = header.slice(1).filter((c) =>
+    /\d{1,2}[.:]\d{2}\s*-\s*\d{1,2}[.:]\d{2}/.test(c.lines.join(' ')));
+  return times.length >= 2;
+}
+
 function classifyProgram(titleText) {
   const t = titleText.toUpperCase();
   // pick the LAST keyword mentioned (closest to the table)
@@ -489,6 +498,10 @@ async function parseWithConn(conn, sheets, DRY) {
 
     for (let ti = 0; ti < tables.length; ti++) {
       const rows = tables[ti];
+      // Only a timetable grid is read: its header row carries the time slots.
+      // Any other table (a grade chart, a worksheet in a practice document)
+      // would otherwise have every first-column entry turned into a batch.
+      if (!hasTimeHeader(rows)) continue;
       const progCode = progs[ti] || 'OET';
       const programId = progByCode[progCode];
       const slots = slotsByProg[programId] || [];

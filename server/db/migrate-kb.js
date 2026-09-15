@@ -42,6 +42,15 @@ export async function migrateKnowledgeBase(pool, { seed = true } = {}) {
      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
 
+  // Re-read every stored sheet so its session count reflects the current parser
+  // (a document that was never a timetable drops to zero and stops generating).
+  // Skipped until time slots exist: counted against no slots, every sheet reads as empty.
+  const [[{ slots }]] = await pool.query('SELECT COUNT(*) AS slots FROM time_slots');
+  if (slots) {
+    const [docs] = await pool.query('SELECT id FROM kb_documents');
+    for (const { id } of docs) await recountDocument(pool, id);
+  }
+
   if (!seed) return 0;
   const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM kb_documents');
   if (n) return 0;                      // already populated (or deliberately emptied)

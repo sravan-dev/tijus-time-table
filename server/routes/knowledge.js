@@ -219,15 +219,18 @@ export async function applySheet(row, { date, program_id = null, replace = false
 
 // The sheets to try when building `date`, best first: those filed under that
 // weekday, then sheets filed under no weekday (e.g. a program's own sheet that
-// holds for every day), most recently added first within each. The caller
-// takes the first that has sessions for the program, and falls back to copying
-// an earlier day when none does.
+// holds for every day), then — for a weekday with no sheet of its own — the
+// other day sheets, so the latest uploaded timetable still beats copying an old
+// day. Most recently added first within each group. The caller takes the first
+// that has sessions for the program, and falls back to copying an earlier day
+// when none does.
 export async function sheetsForDate(date) {
   const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
   const [rows] = await pool.query(
     `SELECT * FROM kb_documents
-      WHERE (weekday = ? OR weekday IS NULL) AND parse_error IS NULL AND session_count > 0
-      ORDER BY weekday IS NULL, created_at DESC`,
+      WHERE parse_error IS NULL AND session_count > 0
+      ORDER BY CASE WHEN weekday = ? THEN 0 WHEN weekday IS NULL THEN 1 ELSE 2 END,
+               created_at DESC, id DESC`,
     [weekday]
   );
   return rows;

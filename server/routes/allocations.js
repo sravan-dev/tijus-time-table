@@ -108,8 +108,9 @@ router.post('/notify', requireEditor, async (req, res) => {
 // POST /api/allocations/generate { date, program_id? }
 // Creates the timetable for an empty day. First choice is the Knowledge Base
 // sheet filed under that weekday (the academy's reference pattern for, say, a
-// Monday); with no matching sheet it falls back to copying the most recent
-// earlier day that has sessions, again preferring the same weekday. Refuses if
+// Monday), then any other sheet (see sheetsForDate); only when no sheet has
+// sessions for the program does it copy the most recent earlier day that has
+// sessions, again preferring the same weekday. Refuses if
 // the target day already has sessions (for the program, when one is given).
 router.post('/generate', requireEditor, async (req, res) => {
   const { date, program_id } = req.body || {};

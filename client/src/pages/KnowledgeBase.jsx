@@ -141,8 +141,8 @@ export default function KnowledgeBase() {
         </p>
         {!!missing.length && (
           <p className="kb-warn">
-            No sheet yet for {missing.map(([n]) => n).join(', ')} — those days still generate by
-            copying the most recent matching day.
+            No sheet yet for {missing.map(([n]) => n).join(', ')} — those days generate from the
+            most recently added day sheet that has sessions for the program.
           </p>
         )}
       </div>
