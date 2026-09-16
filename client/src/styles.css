@@ -460,12 +460,37 @@ table.data thead th { background: #f8fafc; }
 @media print {
   .topbar, .controls, .no-print { display: none !important; }
   .grid-wrap { border: none; }
-  @page { size: landscape; margin: 10mm; }
+  /* No forced page size: forcing landscape makes some PDF viewers show the
+     pages turned sideways. The grid shrinks to the page width instead, so it
+     prints whole in whichever orientation is picked in the print dialog. */
+  @page { margin: 8mm; }
+  .page { padding: 0; }
   .printing-all > .grid-wrap { display: none; }
   .printing-all .print-all { display: block; }
   .print-prog { break-after: page; }
   .print-prog:last-child { break-after: auto; }
-  .print-title { font-size: 16px; margin: 0 0 8px; }
-  .print-all table.tt thead th, .print-all table.tt td.batch { position: static; }
-  .print-all .cell .note { max-width: none; white-space: normal; }
+  .print-title { font-size: 15px; margin: 0 0 6px; }
+
+  .grid-wrap { overflow: visible; }
+  table.tt { table-layout: fixed; width: 100%; font-size: 10px; }
+  table.tt th, table.tt td { min-width: 0; padding: 3px 4px; overflow-wrap: anywhere; }
+  table.tt thead th, table.tt td.batch, table.tt th.batch { position: static; }
+  table.tt th.batch, table.tt td.batch { width: 13%; min-width: 0; white-space: normal; }
+  table.tt thead { display: table-header-group; }   /* repeat the header on each page */
+  table.tt tr { break-inside: avoid; }
+  .cell { min-height: 0; padding: 1px; }
+  .cell .note { max-width: none; white-space: normal; display: inline; }
 }
+
+/* ---- Knowledge Base sheet picker (Generate) ---- */
+.kb-pick { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
+.kb-pick-row {
+  display: flex; align-items: flex-start; gap: 9px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.kb-pick-row:hover { background: var(--brand-tint-2); }
+.kb-pick-row:has(input:checked) { border-color: var(--brand); background: var(--brand-tint-2); }
+.kb-pick-row:has(input:disabled) { cursor: not-allowed; opacity: .6; }
+.kb-pick-row input { width: auto; margin-top: 3px; }
+.kb-pick-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kb-pick-main .sub { font-size: 12px; color: var(--muted); }

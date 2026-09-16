@@ -217,6 +217,16 @@ export async function applySheet(row, { date, program_id = null, replace = false
   return { created: allocations.length, source: 'knowledge-base', sheet: row.title };
 }
 
+// How many sessions a stored sheet would produce for a day — the number the
+// sheet picker shows next to each sheet. Dry parse: nothing is written, and
+// reference rows the sheet needs but the database lacks are counted, not
+// created.
+export async function sheetSessionCount(row, date, program_id = null) {
+  const allocations = await parseDoc(row, date);
+  if (!program_id) return allocations.length;
+  return allocations.filter((a) => a.program_id === Number(program_id)).length;
+}
+
 // The sheets to try when building `date`, best first: those filed under that
 // weekday, then sheets filed under no weekday (e.g. a program's own sheet that
 // holds for every day), then — for a weekday with no sheet of its own — the

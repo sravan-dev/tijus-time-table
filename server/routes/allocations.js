@@ -4,7 +4,8 @@ import { requireAuth, requireEditor } from '../middleware/auth.js';
 import { conflictsForDate } from '../services/conflicts.js';
 import { sendMail, scheduleEmail, sessionAssignedEmail } from '../services/mailer.js';
 import { getSettings } from '../services/settings.js';
-import { sheetsForDate, applySheet } from './knowledge.js';
+import { sheetsForDate, applySheet, sheetSessionCount } from './knowledge.js';
+import { WEEKDAY_NAMES } from '../db/migrate-kb.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -105,15 +106,52 @@ router.post('/notify', requireEditor, async (req, res) => {
   res.json({ sent, total: byFac.size, skipped_no_email: 0, failures });
 });
 
-// POST /api/allocations/generate { date, program_id? }
-// Creates the timetable for an empty day. First choice is the Knowledge Base
-// sheet filed under that weekday (the academy's reference pattern for, say, a
-// Monday), then any other sheet (see sheetsForDate); only when no sheet has
-// sessions for the program does it copy the most recent earlier day that has
-// sessions, again preferring the same weekday. Refuses if
-// the target day already has sessions (for the program, when one is given).
+// GET /api/allocations/sheets?date=&program_id= — the Knowledge Base sheets
+// that could build this day, best first, with how many sessions each holds for
+// the program. Feeds the picker the Timetable opens when Generate finds nothing
+// to build from on its own: the admin chooses the sheet instead of guessing.
+router.get('/sheets', requireEditor, async (req, res) => {
+  const { date, program_id } = req.query;
+  if (!date) return res.status(400).json({ error: 'date is required' });
+  res.json({ sheets: await describeSheets(date, program_id) });
+});
+
+// A sheet that won't parse is still listed, with its reason, rather than
+// dropped — an admin picking sheets needs to see why one is unusable.
+async function describeSheets(date, program_id) {
+  const rows = await sheetsForDate(date);
+  return Promise.all(rows.map(async (r) => {
+    let sessions = null;
+    let error = null;
+    try {
+      sessions = await sheetSessionCount(r, date, program_id || null);
+    } catch (e) {
+      error = e.message;
+    }
+    return {
+      id: r.id,
+      title: r.title,
+      filename: r.filename,
+      weekday: r.weekday,
+      weekday_name: r.weekday == null ? null : WEEKDAY_NAMES[r.weekday],
+      session_count: r.session_count,
+      sessions,
+      error,
+    };
+  }));
+}
+
+// POST /api/allocations/generate { date, program_id?, sheet_id? }
+// Creates the timetable for an empty day. With sheet_id the admin has picked a
+// Knowledge Base sheet themselves (the picker below) and that sheet is used as
+// given. Otherwise: first choice is the Knowledge Base sheet filed under that
+// weekday (the academy's reference pattern for, say, a Monday), then any other
+// sheet (see sheetsForDate); only when no sheet has sessions for the program
+// does it copy the most recent earlier day that has sessions, again preferring
+// the same weekday. Refuses if the target day already has sessions (for the
+// program, when one is given).
 router.post('/generate', requireEditor, async (req, res) => {
-  const { date, program_id } = req.body || {};
+  const { date, program_id, sheet_id } = req.body || {};
   if (!date) return res.status(400).json({ error: 'date is required' });
   const progFilter = program_id ? ' AND program_id = ?' : '';
   const progParams = program_id ? [program_id] : [];
@@ -124,6 +162,16 @@ router.post('/generate', requireEditor, async (req, res) => {
   );
   if (existing.n)
     return res.status(409).json({ error: 'That day already has sessions' });
+
+  // A sheet the admin picked in the modal is used as asked — including its
+  // failures, which are theirs to see rather than silently skipped.
+  if (sheet_id) {
+    const [[sheet]] = await pool.query('SELECT * FROM kb_documents WHERE id = ?', [sheet_id]);
+    if (!sheet) return res.status(404).json({ error: 'Sheet not found' });
+    const applied = await applySheet(sheet, { date, program_id });
+    if (applied.error) return res.status(applied.status || 400).json({ error: applied.error });
+    return res.json(applied);
+  }
 
   // A Knowledge Base sheet beats a copied day: it is the pattern an admin
   // curated for this weekday. Its own failures (an unreadable sheet, nothing for
@@ -138,8 +186,18 @@ router.post('/generate', requireEditor, async (req, res) => {
       ORDER BY alloc_date DESC`,
     [date, ...progParams]
   );
-  if (!cands.length)
-    return res.status(400).json({ error: 'No earlier day to copy from' });
+  // Nothing to copy either. Hand back the Knowledge Base sheets so the client
+  // can offer them, instead of leaving the admin at a dead end.
+  if (!cands.length) {
+    const sheets = await describeSheets(date, program_id);
+    return res.status(400).json({
+      error: sheets.length
+        ? 'No earlier day to copy from — pick a Knowledge Base sheet'
+        : 'No earlier day to copy from, and the Knowledge Base has no usable sheet',
+      code: 'no_source',
+      sheets,
+    });
+  }
   const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
   const sameWeekday = cands.find(
     (r) => new Date(r.alloc_date + 'T00:00:00Z').getUTCDay() === weekday

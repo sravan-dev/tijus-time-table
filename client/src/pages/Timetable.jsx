@@ -16,6 +16,7 @@ function noteStyle(a) {
 import BatchModal from '../components/BatchModal';
 import ActivityModal from '../components/ActivityModal';
 import SplitCellModal from '../components/SplitCellModal';
+import GenerateModal from '../components/GenerateModal';
 
 export default function Timetable() {
   const { canEdit } = useAuth();
@@ -58,6 +59,9 @@ export default function Timetable() {
   const [printing, setPrinting] = useState(false);
   const [facultyId, setFacultyId] = useState(''); // optional faculty filter
   const [generating, setGenerating] = useState(false);
+  // Knowledge Base sheet picker, opened when Generate has nothing to build the
+  // day from on its own: { sheets } (the list the failed Generate handed back).
+  const [pickingSheet, setPickingSheet] = useState(null);
   const [clearing, setClearing] = useState(false);
   const dragRef = useRef(null);           // allocation being dragged
   const [dragOver, setDragOver] = useState(null); // cellKey of the current drop target
@@ -187,8 +191,11 @@ export default function Timetable() {
 
   const confCount = Object.keys(data.conflicts).length;
 
-  // Fill an empty day for the current program by copying the most recent
-  // matching day (same weekday when available) via /allocations/generate.
+  // Fill an empty day for the current program from a Knowledge Base sheet,
+  // falling back to the most recent matching day, via /allocations/generate.
+  // When the server has neither (no sheet fits and no earlier day exists) it
+  // answers code 'no_source' with the sheets it knows, and we open the picker
+  // so the admin can choose one themselves.
   async function generateDay() {
     const prog = programs.find((p) => p.id === programId);
     if (!confirm(`Generate the ${prog?.code || ''} timetable for ${fmt(date)} ` +
@@ -198,15 +205,26 @@ export default function Timetable() {
       const { data: g } = await api.post('/allocations/generate', {
         date, program_id: programId,
       });
-      const { data: ds } = await api.get('/allocations/dates');
-      setDates(ds.map((d) => d.slice(0, 10)));
-      await reload();
-      toast(`Created ${g.created} sessions (copied from ${fmt(g.source_date)})`);
+      await afterGenerate(g);
     } catch (e) {
-      toast(e.response?.data?.error || 'Could not generate the timetable', 'error');
+      const body = e.response?.data;
+      if (body?.code === 'no_source' && body.sheets?.length) setPickingSheet({ sheets: body.sheets });
+      else toast(body?.error || 'Could not generate the timetable', 'error');
     } finally {
       setGenerating(false);
     }
+  }
+
+  // Reload the day (and the picker's date list) after a generate succeeded,
+  // from either route, and say where the sessions came from.
+  async function afterGenerate(g) {
+    const { data: ds } = await api.get('/allocations/dates');
+    setDates(ds.map((d) => d.slice(0, 10)));
+    await reload();
+    const from = g.source === 'knowledge-base'
+      ? `from the "${g.sheet}" sheet`
+      : `copied from ${fmt(g.source_date)}`;
+    toast(`Created ${g.created} sessions (${from})`);
   }
 
   // Print every program's timetable for the day as one document (one program
@@ -1179,6 +1197,17 @@ export default function Timetable() {
           date={date}
           onClose={() => setSplitting(null)}
           onSaved={() => { setSplitting(null); reload(); }}
+        />
+      )}
+
+      {pickingSheet && (
+        <GenerateModal
+          date={date}
+          programId={programId}
+          programCode={programs.find((p) => p.id === programId)?.code || ''}
+          sheets={pickingSheet.sheets}
+          onClose={() => setPickingSheet(null)}
+          onGenerated={(g) => { setPickingSheet(null); afterGenerate(g); }}
         />
       )}
 
