@@ -71,9 +71,13 @@ export default function GenerateModal({ date, programId, programCode,
               {sheets.map((s) => (
                 <label key={s.id} className="kb-pick-row"
                   title={s.error || s.filename}>
+                  {/* Only a sheet that cannot be read is unpickable. One with
+                      nothing for this program stays selectable — it may still
+                      be the sheet the admin means, and the attempt says so
+                      plainly rather than leaving every row greyed out. */}
                   <input type="radio" name="kb-sheet" value={s.id}
                     checked={sheetId === s.id}
-                    disabled={!!s.error || s.sessions === 0}
+                    disabled={!!s.error}
                     onChange={() => setSheetId(s.id)} />
                   <span className="kb-pick-main">
                     <b>{s.title}</b>
@@ -91,6 +95,12 @@ export default function GenerateModal({ date, programId, programCode,
           </div>
         )}
 
+        {picked && !picked.error && picked.sessions === 0 && !err && (
+          <div className="sub" style={{ color: 'var(--error)' }}>
+            That sheet holds nothing for {programCode || 'this program'} —
+            generating from it will come back empty.
+          </div>
+        )}
         {err && <div className="err">{err}</div>}
         <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>

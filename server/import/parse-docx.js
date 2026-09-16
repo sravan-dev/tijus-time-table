@@ -84,7 +84,9 @@ function visibleText(xmlChunk) {
 }
 
 // Determine which program each table belongs to, using the title paragraphs
-// that sit between tables in document order.
+// that sit between tables in document order. The title itself comes back too:
+// a sheet heads one grid "IELTS,PTE", and the rows of that grid are split
+// between the two programs by their batch label (see the parse loop).
 function detectProgramsFromXml(xml) {
   const parts = xml.split('<w:tbl>');
   const result = [];
@@ -93,8 +95,8 @@ function detectProgramsFromXml(xml) {
   let preText = parts[0];
   for (let i = 1; i < parts.length; i++) {
     const after = parts[i].split('</w:tbl>');
-    const beforeTable = preText; // text preceding this table
-    result.push(classifyProgram(visibleText(beforeTable)));
+    const title = visibleText(preText); // text preceding this table
+    result.push({ code: classifyProgram(title), title });
     preText = after[1] || ''; // text between this table and the next
   }
   return result;
@@ -502,7 +504,7 @@ async function parseWithConn(conn, sheets, DRY) {
       // Any other table (a grade chart, a worksheet in a practice document)
       // would otherwise have every first-column entry turned into a batch.
       if (!hasTimeHeader(rows)) continue;
-      const progCode = progs[ti] || 'OET';
+      const { code: progCode, title } = progs[ti] || { code: 'OET', title: '' };
       const programId = progByCode[progCode];
       const slots = slotsByProg[programId] || [];
       if (!slots.length) continue;
@@ -529,6 +531,12 @@ async function parseWithConn(conn, sheets, DRY) {
         }
       }
 
+      // "IELTS,PTE" heads a single grid holding both programs: the PTE batches
+      // are the rows whose label says so. Without this every PTE row lands in
+      // IELTS and the PTE timetable can never be built from a sheet.
+      const splitPTE = progCode === 'IELTS' && progByCode.PTE != null
+        && /\bPTE\b/.test((title || '').toUpperCase());
+
       // data rows start after the header row (row 0)
       for (let ri = 1; ri < rows.length; ri++) {
         const cells = rows[ri];
@@ -536,7 +544,16 @@ async function parseWithConn(conn, sheets, DRY) {
         const label = (cells[0].lines.join(' ') || '').replace(/\s+/g, ' ').trim();
         if (!label) continue;
 
-        const batchId = await getBatchId(programId, label);
+        // A row of the shared grid belongs to PTE when its batch says PTE; its
+        // sessions then go in PTE's own slots, matched to this table's columns
+        // by label (the two programs share the standard timings).
+        const rowIsPTE = splitPTE && /\bPTE\b/.test(label.toUpperCase());
+        const rowProgramId = rowIsPTE ? progByCode.PTE : programId;
+        const rowSlots = rowIsPTE
+          ? slots.map((s) => (slotsByProg[progByCode.PTE] || []).find((t) => t.label === s.label) || null)
+          : slots;
+
+        const batchId = await getBatchId(rowProgramId, label);
 
         // walk columns honouring gridSpan
         let col = 0;
@@ -550,7 +567,7 @@ async function parseWithConn(conn, sheets, DRY) {
             if (slotIndex === droppedColIndex) continue;     // dropped lunch column
             if (slotIndex > droppedColIndex) slotIndex -= 1; // shift later columns left
           }
-          const slot = slots[slotIndex];
+          const slot = rowSlots[slotIndex];
           const cellText = cell.lines.join(' ').replace(/\s+/g, ' ').trim();
           if (!cellText || !slot) continue;
           if (/^(BREAK|LUNCH BREAK|LUNCH)$/i.test(cellText)) continue;
@@ -563,7 +580,7 @@ async function parseWithConn(conn, sheets, DRY) {
 
           const alloc = {
             alloc_date: isoDate,
-            program_id: programId,
+            program_id: rowProgramId,
             batch_id: batchId,
             activity_id: activityId,
             time_slot_id: slot.id,
