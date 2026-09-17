@@ -716,7 +716,8 @@ export default function Timetable() {
         </div>
       )}
 
-      <div className="grid-wrap">
+      {/* The grid has its own right-click menu, so never show the browser's. */}
+      <div className="grid-wrap" onContextMenu={(e) => e.preventDefault()}>
         <table className="tt">
           <thead>
             <tr>
@@ -918,7 +919,7 @@ export default function Timetable() {
                           <button type="button" className="split-add no-print"
                             title="Split this cell — add another area"
                             onClick={(e) => { e.stopPropagation(); setSplitting(cellRef); }}
-                            onContextMenu={(e) => e.stopPropagation()}>
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
                             <span>+</span>
                           </button>
                         )}
@@ -929,7 +930,7 @@ export default function Timetable() {
                             title="Drag across or down to copy this cell into empty cells"
                             onPointerDown={(e) => startFill(e, ri, ci)}
                             onClick={(e) => e.stopPropagation()}
-                            onContextMenu={(e) => e.stopPropagation()} />
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }} />
                         )}
                       </div>
                     </td>
