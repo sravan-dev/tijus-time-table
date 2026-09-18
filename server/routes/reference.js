@@ -11,14 +11,75 @@ router.get('/programs', async (_req, res) => {
   res.json(rows);
 });
 
+// `?usage=1` adds how many sessions sit in each slot — Manage → Timings shows it
+// so nobody deletes a column that still holds classes.
 router.get('/slots', async (req, res) => {
   const { program_id } = req.query;
   const params = [];
-  let sql = 'SELECT * FROM time_slots';
+  let sql = req.query.usage
+    ? `SELECT ts.*, (SELECT COUNT(*) FROM allocations a WHERE a.time_slot_id = ts.id) AS usage_count
+         FROM time_slots ts`
+    : 'SELECT * FROM time_slots';
   if (program_id) { sql += ' WHERE program_id = ?'; params.push(program_id); }
-  sql += ' ORDER BY program_id, sort_order';
+  sql += ' ORDER BY program_id, sort_order, id';
   const [rows] = await pool.query(sql, params);
   res.json(rows);
+});
+
+// Add a slot (a new column) at the end of a program's grid.
+router.post('/slots', requireEditor, async (req, res) => {
+  const { program_id, label, start_time = null, end_time = null } = req.body;
+  if (!program_id) return res.status(400).json({ error: 'A program is required' });
+  if (!label || !String(label).trim()) return res.status(400).json({ error: 'A label is required' });
+  const [[{ next }]] = await pool.query(
+    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM time_slots WHERE program_id = ?', [program_id]);
+  try {
+    const [r] = await pool.query(
+      'INSERT INTO time_slots (program_id, label, start_time, end_time, sort_order) VALUES (?, ?, ?, ?, ?)',
+      [program_id, String(label).trim(), start_time || null, end_time || null, next]
+    );
+    res.json({ id: r.insertId });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY')
+      return res.status(409).json({ error: 'Another slot in this program already uses that label' });
+    throw e;
+  }
+});
+
+// Persist a program's column order: { program_id, order: [slot ids] }.
+// Registered before /slots/:id so "reorder" isn't read as an id.
+router.put('/slots/reorder', requireEditor, async (req, res) => {
+  const { program_id, order } = req.body;
+  if (!program_id || !Array.isArray(order) || !order.length)
+    return res.status(400).json({ error: 'program_id and order are required' });
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (let i = 0; i < order.length; i++) {
+      await conn.query('UPDATE time_slots SET sort_order = ? WHERE id = ? AND program_id = ?',
+        [i, order[i], program_id]);
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+});
+
+// Delete a slot. Refused while sessions still sit in it, so a column of
+// classes can't vanish from the timetable by accident.
+router.delete('/slots/:id', requireEditor, async (req, res) => {
+  const [[{ n }]] = await pool.query(
+    'SELECT COUNT(*) AS n FROM allocations WHERE time_slot_id = ?', [req.params.id]);
+  if (n) return res.status(409).json({
+    error: `${n} session${n > 1 ? 's are' : ' is'} in this slot — move or clear them first`,
+  });
+  const [r] = await pool.query('DELETE FROM time_slots WHERE id = ?', [req.params.id]);
+  if (!r.affectedRows) return res.status(404).json({ error: 'Slot not found' });
+  res.json({ ok: true });
 });
 
 // Edit a slot's label and start/end times (admins). Existing allocations keep

@@ -25,13 +25,14 @@ export default function Manage() {
       {tab === 'modules' && <Modules />}
       {tab === 'rooms' && <Rooms />}
       {tab === 'activities' && <Activities />}
+      {tab === 'timings' && <Timings />}
     </div>
   );
 }
 
 // "Modules" here is tutor capability (who can teach Listening/Reading/…);
 // "Activities" is the session-type list the grid prints as R, W, W.C and so on.
-const TABS = ['batches', 'faculty', 'modules', 'rooms', 'activities'];
+const TABS = ['batches', 'faculty', 'modules', 'rooms', 'activities', 'timings'];
 
 function Batches() {
   const { canEdit } = useAuth();
@@ -346,6 +347,153 @@ function Rooms() {
             toast(`Split ${code} into ${n} section${n > 1 ? 's' : ''}`);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// A program's time slots: the columns of its timetable grid, in order. Changing
+// a slot re-times that column for every day (sessions keep their slot link).
+function Timings() {
+  const { canEdit } = useAuth();
+  const toast = useToast();
+  const [programs, setPrograms] = useState([]);
+  const [programId, setProgramId] = useState(null);
+  const [rows, setRows] = useState([]);
+
+  const load = (pid = programId) =>
+    api.get('/slots', { params: { program_id: pid, usage: 1 } }).then((r) => setRows(r.data));
+
+  useEffect(() => {
+    api.get('/programs').then((r) => {
+      setPrograms(r.data);
+      if (r.data.length) setProgramId(r.data[0].id);
+    });
+  }, []);
+  useEffect(() => { if (programId) load(programId); }, [programId]);
+
+  const hhmm = (t) => (t || '').slice(0, 5);
+
+  async function save(s, patch) {
+    const next = { ...s, ...patch };
+    if (!String(next.label).trim()) { toast('A label is required', 'error'); load(); return; }
+    try {
+      await api.put(`/slots/${s.id}`, {
+        label: String(next.label).trim(),
+        start_time: hhmm(next.start_time) || null,
+        end_time: hhmm(next.end_time) || null,
+      });
+      await load();
+      toast(`Saved ${String(next.label).trim()}`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Save failed', 'error');
+      load();
+    }
+  }
+
+  async function add() {
+    const label = prompt('Label shown in the grid header? (e.g. 5.00-6.00)');
+    if (!label?.trim()) return;
+    try {
+      await api.post('/slots', { program_id: programId, label: label.trim() });
+      await load();
+      toast(`Added ${label.trim()} — set its start and end times`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not add the slot', 'error');
+    }
+  }
+
+  async function move(i, dir) {
+    const order = rows.map((s) => s.id);
+    const j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    try {
+      await api.put('/slots/reorder', { program_id: programId, order });
+      await load();
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not reorder', 'error');
+    }
+  }
+
+  async function del(s) {
+    if (!confirm(`Delete the ${s.label} slot from ${program?.code}?`)) return;
+    try {
+      await api.delete(`/slots/${s.id}`);
+      await load();
+      toast(`Deleted ${s.label}`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Delete failed', 'error');
+    }
+  }
+
+  const program = programs.find((p) => p.id === programId);
+
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+        <b>Timings ({rows.length})</b>
+        <div className="row" style={{ gap: 8 }}>
+          <select value={programId || ''} onChange={(e) => setProgramId(Number(e.target.value))}>
+            {programs.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+          </select>
+          {canEdit && <button className="btn sm" onClick={add} disabled={!programId}>+ Add</button>}
+        </div>
+      </div>
+      <div className="sub" style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 10 }}>
+        The time slots of the <b>{program?.code}</b> timetable, left to right. The <b>label</b> is
+        what the grid header prints; a change applies to every day. Generating from a day sheet
+        fills the slots by position, so keep them in the sheet's column order.
+      </div>
+      <table className="data">
+        <thead>
+          <tr>
+            <th>#</th><th>Label</th><th>Start</th><th>End</th><th>Sessions</th>
+            {canEdit && <th />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s, i) => (
+            // keyed on the values so the inputs reset after every save/reload
+            <tr key={`${s.id}|${s.label}|${s.start_time}|${s.end_time}`}>
+              <td>{i + 1}</td>
+              <td>
+                {canEdit ? (
+                  <input type="text" style={{ width: 120 }} defaultValue={s.label}
+                    onBlur={(e) => { if (e.target.value.trim() !== s.label) save(s, { label: e.target.value }); }} />
+                ) : <b>{s.label}</b>}
+              </td>
+              <td>
+                {canEdit ? (
+                  <input type="time" defaultValue={hhmm(s.start_time)}
+                    onBlur={(e) => { if (e.target.value !== hhmm(s.start_time)) save(s, { start_time: e.target.value }); }} />
+                ) : hhmm(s.start_time)}
+              </td>
+              <td>
+                {canEdit ? (
+                  <input type="time" defaultValue={hhmm(s.end_time)}
+                    onBlur={(e) => { if (e.target.value !== hhmm(s.end_time)) save(s, { end_time: e.target.value }); }} />
+                ) : hhmm(s.end_time)}
+              </td>
+              <td>{s.usage_count ?? 0}</td>
+              {canEdit && (
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn sm ghost" onClick={() => move(i, -1)} disabled={i === 0} title="Move left">↑</button>
+                  <button className="btn sm ghost" style={{ marginLeft: 4 }} onClick={() => move(i, 1)}
+                    disabled={i === rows.length - 1} title="Move right">↓</button>
+                  <button className="btn sm danger" style={{ marginLeft: 6 }} onClick={() => del(s)}
+                    disabled={s.usage_count > 0}
+                    title={s.usage_count > 0 ? 'Sessions use this slot — move or clear them first' : 'Delete'}>
+                    Delete
+                  </button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length && programId && (
+        <div className="notif-empty">No time slots for this program yet.</div>
       )}
     </div>
   );

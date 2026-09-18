@@ -9,8 +9,8 @@
 // Slots are re-timed IN PLACE (matched by their current label) so every
 // existing allocation keeps its time_slot_id link. A database still on the old
 // 8-slot grid also loses its "1.10-2.00" lunch column, provided nothing was
-// ever allocated there. The German grid is left untouched. Runs on every boot
-// (see init.js) and is safe to re-run.
+// ever allocated there. The German grid is left untouched. Called on every boot
+// (see init.js) but does its work only once per database.
 import { pool as defaultPool } from './pool.js';
 
 const STANDARD = ['OET', 'IELTS', 'PTE', 'FLUENCY'];
@@ -27,8 +27,15 @@ export const STANDARD_TIMES = [
 ];
 const DROP_LABEL = '1.10-2.00';
 
+// Runs once per database: afterwards the timings belong to the admins
+// (Manage → Timings), and a restart must not put back what they changed.
+const DONE_KEY = 'timings_sheet_v1';
+
 export async function migrateTimings(pool = defaultPool) {
+  const [[done]] = await pool.query('SELECT svalue FROM app_settings WHERE skey = ?', [DONE_KEY]);
+  if (done) return;
   const [progs] = await pool.query('SELECT id, code FROM programs WHERE code IN (?)', [STANDARD]);
+  if (!progs.length) return;                  // fresh database: the seed brings these timings
   for (const { id: pid, code } of progs) {
     let changed = 0;
     for (let i = 0; i < STANDARD_TIMES.length; i++) {
@@ -51,6 +58,7 @@ export async function migrateTimings(pool = defaultPool) {
     }
     if (changed) console.log(`[timings] ${code}: re-timed ${changed} slot(s) to the sheet timings`);
   }
+  await pool.query('INSERT IGNORE INTO app_settings (skey, svalue) VALUES (?, ?)', [DONE_KEY, '1']);
 }
 
 // CLI entry point: `node db/migrate-timings.js`
