@@ -214,7 +214,34 @@ export async function applySheet(row, { date, program_id = null, replace = false
     );
   }
   await insertAllocations(allocations);
+  await orderBatchesLikeSheet(allocations);
   return { created: allocations.length, source: 'knowledge-base', sheet: row.title };
+}
+
+// The grid lists rows by batches.sort_order, but a sheet's rows are matched to
+// batches that already carry an order of their own (and new ones start at 0,
+// jumping to the top). Renumber each program's batches so the sheet's rows come
+// first, in the order the sheet lists them; batches the sheet doesn't mention
+// keep their relative order after them.
+async function orderBatchesLikeSheet(allocations) {
+  const sheetOrder = new Map();               // program id -> [batch ids, sheet order]
+  for (const a of allocations) {
+    if (a.batch_id == null) continue;
+    const ids = sheetOrder.get(a.program_id) || [];
+    if (!ids.includes(a.batch_id)) ids.push(a.batch_id);
+    sheetOrder.set(a.program_id, ids);
+  }
+  for (const [programId, ids] of sheetOrder) {
+    const [rest] = await pool.query(
+      'SELECT id FROM batches WHERE program_id = ? AND id NOT IN (?) ORDER BY sort_order, id',
+      [programId, ids]
+    );
+    const order = [...ids, ...rest.map((r) => r.id)];
+    for (let i = 0; i < order.length; i++) {
+      await pool.query('UPDATE batches SET sort_order = ? WHERE id = ? AND program_id = ?',
+        [i + 1, order[i], programId]);
+    }
+  }
 }
 
 // How many sessions a stored sheet would produce for a day — the number the
