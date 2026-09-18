@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { pool } from './pool.js';
 import { seedReference } from './seed-reference.js';
 import { migrateActivityColors } from './migrate-activity-colors.js';
+import { migrateTimings } from './migrate-timings.js';
 import { migrateKnowledgeBase, seedFromFolder } from './migrate-kb.js';
 import { importDocx } from '../import/parse-docx.js';
 
@@ -99,6 +100,10 @@ export async function initDb() {
       console.log('[init] Seeding reference data…');
       await seedReference();
     }
+
+    // Standard grid timings follow the academy's day sheets (9.10 start).
+    try { await migrateTimings(pool); }
+    catch (e) { console.error('[init] timings patch failed:', e.message); }
 
     // 4. Import the daily timetables only if there are no allocations yet.
     const [[{ n: allocs }]] = await pool.query('SELECT COUNT(*) AS n FROM allocations');

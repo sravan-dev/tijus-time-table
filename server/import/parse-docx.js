@@ -513,10 +513,10 @@ async function parseWithConn(conn, sheets, DRY) {
         continue;
       }
 
-      // The new standard grid dropped the historical "1.10-2.00" column (an
-      // always-empty lunch slot). The docx files still carry it, so locate it
-      // in this table's header and skip it when mapping columns onto slots,
-      // keeping the remaining columns aligned. (German grid is unchanged.)
+      // The standard grid has no lunch slot, but the docx files carry an
+      // always-empty lunch column ("1.10-2.00" in older sheets, "1.10-1.50" in
+      // newer ones). Locate it in this table's header and skip it when mapping
+      // columns onto slots, keeping the remaining columns aligned.
       let droppedColIndex = -1; // session-column index (0-based) to skip
       if (progCode !== 'GERMAN') {
         const header = rows[0] || [];
@@ -526,7 +526,7 @@ async function parseWithConn(conn, sheets, DRY) {
           if (ci === 0) { hc += span; continue; }
           // strip ALL whitespace: some tables label it "1.10- 2.00"
           const hl = (header[ci].lines.join('') || '').replace(/\s+/g, '');
-          if (hl === '1.10-2.00') { droppedColIndex = hc - 1; break; }
+          if (hl === '1.10-2.00' || hl === '1.10-1.50') { droppedColIndex = hc - 1; break; }
           hc += span;
         }
       }

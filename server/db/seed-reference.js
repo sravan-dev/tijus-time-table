@@ -2,6 +2,7 @@
 // batches) plus a default admin user. Idempotent: safe to re-run.
 import bcrypt from 'bcryptjs';
 import { pool } from './pool.js';
+import { STANDARD_TIMES } from './migrate-timings.js';
 
 // ---- Programs -------------------------------------------------------------
 const PROGRAMS = [
@@ -80,19 +81,10 @@ const ACTIVITIES = [
 ];
 
 // ---- Time slots per program ----------------------------------------------
-// OET / IELTS / PTE / Fluency share the 7-session grid (updated timing sheet):
-// 1hr sessions with a 15-min break after the 2nd, a 45-min lunch after the
-// 4th, and a 10-min break before the last. migrate-timings.js moves existing
-// databases off the old 8-slot grid (dropping the empty "1.10-2.00" lunch col).
-const STANDARD_SLOTS = [
-  ['9.00-10.00', '09:00', '10:00'],
-  ['10.00-11.00', '10:00', '11:00'],
-  ['11.15-12.15', '11:15', '12:15'],
-  ['12.15-1.15', '12:15', '13:15'],
-  ['2.00-2.55', '14:00', '14:55'],
-  ['2.55-3.50', '14:55', '15:50'],
-  ['4.00-5.00', '16:00', '17:00'],
-];
+// OET / IELTS / PTE / Fluency share the 7-session grid of the day sheets
+// (9.10 start, lunch 1.10-1.50). migrate-timings.js keeps existing databases
+// on the same timings.
+const STANDARD_SLOTS = STANDARD_TIMES.map(([label, start, end]) => [label, start, end]);
 const GERMAN_SLOTS = [
   ['9.15-11.15', '09:15', '11:15'],
   ['11.15-11.30', '11:15', '11:30'],

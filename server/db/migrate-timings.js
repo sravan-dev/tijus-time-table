@@ -1,76 +1,61 @@
-// Idempotent migration: switch the standard timetable grid
-// (OET / IELTS / PTE / Fluency) from the old 8-slot layout to the new
-// 7-session schedule from the academy's updated timing sheet:
+// Idempotent migration: put the standard timetable grid (OET / IELTS / PTE /
+// Fluency) on the timings the academy's day sheets use:
 //
-//   1  09:00-10:00   |  2  10:00-11:00   |  (break 11:00-11:15)
-//   3  11:15-12:15   |  4  12:15-13:15   |  (lunch 13:15-14:00)
-//   5  14:00-14:55   |  6  14:55-15:50   |  (break 15:50-16:00)
+//   1  09:10-10:05   |  2  10:05-11:05   |  (break 11:05-11:10)
+//   3  11:10-12:10   |  4  12:10-13:10   |  (lunch 13:10-13:50)
+//   5  13:50-14:50   |  6  14:50-15:50   |  (break 15:50-16:00)
 //   7  16:00-17:00
 //
-// The 7 surviving slots are re-timed IN PLACE (matched by their old label) so
-// every existing allocation keeps its time_slot_id link. The historical
-// "1.10-2.00" slot — now the lunch break — is dropped; it carries no
-// allocations. The German grid is left untouched. Safe to re-run.
-import { pool } from './pool.js';
+// Slots are re-timed IN PLACE (matched by their current label) so every
+// existing allocation keeps its time_slot_id link. A database still on the old
+// 8-slot grid also loses its "1.10-2.00" lunch column, provided nothing was
+// ever allocated there. The German grid is left untouched. Runs on every boot
+// (see init.js) and is safe to re-run.
+import { pool as defaultPool } from './pool.js';
 
 const STANDARD = ['OET', 'IELTS', 'PTE', 'FLUENCY'];
 
-// old label -> [new label, start, end, sort_order]
-const RETIME = [
-  ['9.10-10.05', '9.00-10.00', '09:00', '10:00', 0],
-  ['10.05-11.05', '10.00-11.00', '10:00', '11:00', 1],
-  ['11.10-12.10', '11.15-12.15', '11:15', '12:15', 2],
-  ['12.10-1.10', '12.15-1.15', '12:15', '13:15', 3],
-  ['1.50-2.50', '2.00-2.55', '14:00', '14:55', 4],
-  ['2.50-3.50', '2.55-3.50', '14:55', '15:50', 5],
-  ['4.00-5.00', '4.00-5.00', '16:00', '17:00', 6],
+// [new label, start, end, labels it replaces]
+export const STANDARD_TIMES = [
+  ['9.10-10.05', '09:10', '10:05', ['9.00-10.00']],
+  ['10.05-11.05', '10:05', '11:05', ['10.00-11.00']],
+  ['11.10-12.10', '11:10', '12:10', ['11.15-12.15']],
+  ['12.10-1.10', '12:10', '13:10', ['12.15-1.15']],
+  ['1.50-2.50', '13:50', '14:50', ['2.00-2.55']],
+  ['2.50-3.50', '14:50', '15:50', ['2.55-3.50']],
+  ['4.00-5.00', '16:00', '17:00', []],
 ];
 const DROP_LABEL = '1.10-2.00';
 
-async function run() {
-  const conn = await pool.getConnection();
-  try {
-    const [progs] = await conn.query(
-      'SELECT id, code FROM programs WHERE code IN (?)', [STANDARD]);
-    if (!progs.length) {
-      console.log('• no standard programs found — nothing to do');
-      return;
+export async function migrateTimings(pool = defaultPool) {
+  const [progs] = await pool.query('SELECT id, code FROM programs WHERE code IN (?)', [STANDARD]);
+  for (const { id: pid, code } of progs) {
+    let changed = 0;
+    for (let i = 0; i < STANDARD_TIMES.length; i++) {
+      const [label, start, end, old] = STANDARD_TIMES[i];
+      const [r] = await pool.query(
+        `UPDATE time_slots SET label=?, start_time=?, end_time=?, sort_order=?
+          WHERE program_id=? AND label IN (?)
+            AND NOT (label <=> ? AND start_time <=> ? AND end_time <=> ? AND sort_order <=> ?)`,
+        [label, start, end, i, pid, [label, ...old], label, `${start}:00`, `${end}:00`, i]);
+      changed += r.affectedRows;
     }
 
-    for (const { id: pid, code } of progs) {
-      // 1) Re-time the surviving slots in place, matched by their OLD label.
-      //    Once a label has changed, a re-run simply matches 0 rows.
-      let retimed = 0;
-      for (const [oldLabel, newLabel, start, end, sort] of RETIME) {
-        const [r] = await conn.query(
-          `UPDATE time_slots SET label=?, start_time=?, end_time=?, sort_order=?
-            WHERE program_id=? AND label=?`,
-          [newLabel, start, end, sort, pid, oldLabel]);
-        retimed += r.affectedRows;
-      }
-
-      // 2) Drop the old "1.10-2.00" slot (the new lunch break). Refuse to drop
-      //    it if anything was ever allocated there, to avoid orphaning sessions.
-      const [[slot]] = await conn.query(
-        'SELECT id FROM time_slots WHERE program_id=? AND label=?', [pid, DROP_LABEL]);
-      if (slot) {
-        const [[{ n }]] = await conn.query(
-          'SELECT COUNT(*) n FROM allocations WHERE time_slot_id=?', [slot.id]);
-        if (n === 0) {
-          await conn.query('DELETE FROM time_slots WHERE id=?', [slot.id]);
-          console.log(`• ${code}: re-timed slots, dropped "${DROP_LABEL}"`);
-        } else {
-          console.warn(`⚠ ${code}: "${DROP_LABEL}" has ${n} allocation(s) — left in place; reassign them, then re-run`);
-        }
-      } else {
-        console.log(`• ${code}: already on the new grid (re-timed ${retimed})`);
-      }
+    const [[slot]] = await pool.query(
+      'SELECT id FROM time_slots WHERE program_id=? AND label=?', [pid, DROP_LABEL]);
+    if (slot) {
+      const [[{ n }]] = await pool.query(
+        'SELECT COUNT(*) n FROM allocations WHERE time_slot_id=?', [slot.id]);
+      if (n === 0) await pool.query('DELETE FROM time_slots WHERE id=?', [slot.id]);
+      else console.warn(`[timings] ${code}: "${DROP_LABEL}" has ${n} session(s) — left in place`);
     }
-    console.log('✅ Timings migration complete (standard grid → new 7-session schedule).');
-  } finally {
-    conn.release();
-    await pool.end();
+    if (changed) console.log(`[timings] ${code}: re-timed ${changed} slot(s) to the sheet timings`);
   }
 }
 
-run().catch((e) => { console.error(e); process.exit(1); });
+// CLI entry point: `node db/migrate-timings.js`
+if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('db/migrate-timings.js')) {
+  migrateTimings()
+    .then(() => defaultPool.end())
+    .catch((e) => { console.error(e); process.exit(1); });
+}
