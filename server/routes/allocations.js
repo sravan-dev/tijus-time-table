@@ -204,13 +204,17 @@ router.post('/generate', requireEditor, async (req, res) => {
   );
   const source = (sameWeekday || cands[0]).alloc_date;
 
+  // merge_id is only ever matched together with the date, so reusing the
+  // source day's ids keeps its merged cells merged on the new day.
   const [r] = await pool.query(
     `INSERT INTO allocations (alloc_date, program_id, batch_id, activity_id, time_slot_id,
                               classroom_id, faculty_id, student_count, raw_text, note,
-                              text_color, bg_color, note_text_color, note_bg_color)
+                              text_color, bg_color, note_text_color, note_bg_color,
+                              merge_id, merge_copy)
      SELECT ?, program_id, batch_id, activity_id, time_slot_id,
             classroom_id, faculty_id, student_count, raw_text, note,
-            text_color, bg_color, note_text_color, note_bg_color
+            text_color, bg_color, note_text_color, note_bg_color,
+            merge_id, merge_copy
        FROM allocations WHERE alloc_date = ?${progFilter}`,
     [date, source, ...progParams]
   );
@@ -263,6 +267,161 @@ router.post('/copy-column', requireEditor, async (req, res) => {
       source_date, program_id, source_slot_id, ...(cell ? [source_batch_id] : [])]
   );
   res.json({ created: r.affectedRows });
+});
+
+// ---- Merged cells -------------------------------------------------------
+// A merge joins a run of adjacent slots in one batch row into one wide cell.
+// The first cell's sessions stay the originals (merge_copy = 0) and every
+// other slot of the run gets copies of them (merge_copy = 1), all sharing a
+// merge_id. The copies keep conflicts, tutor schedules and emails right for
+// every slot the merged cell covers; syncMerge rewrites them whenever the
+// originals change, so the grid only ever edits the first cell.
+
+const COPY_COLS = `program_id, batch_id, activity_id, classroom_id, faculty_id,
+  student_count, raw_text, note, text_color, bg_color, note_text_color, note_bg_color`;
+
+// Rebuild the copies of one merged cell from its originals. `slotIds` names
+// the slots that should hold copies; by default the ones that hold them now.
+// A merge whose originals are all gone is dissolved, copies and all.
+async function syncMerge(db, { date, program_id, batch_id, merge_id }, slotIds = null) {
+  const [rows] = await db.query(
+    `SELECT id, time_slot_id, merge_copy, status FROM allocations
+      WHERE alloc_date = ? AND program_id = ? AND batch_id = ? AND merge_id = ?
+      ORDER BY id`,
+    [date, program_id, batch_id, merge_id]
+  );
+  const originals = rows.filter((r) => !r.merge_copy);
+  const slots = slotIds || [...new Set(rows.filter((r) => r.merge_copy).map((r) => r.time_slot_id))];
+  await db.query(
+    `DELETE FROM allocations
+      WHERE alloc_date = ? AND program_id = ? AND batch_id = ? AND merge_id = ? AND merge_copy = 1`,
+    [date, program_id, batch_id, merge_id]
+  );
+  // Only approved sessions are copied: a tutor's pending request stays theirs.
+  const ids = originals.filter((r) => r.status === 'approved').map((r) => r.id);
+  if (!ids.length) {
+    await db.query(
+      'UPDATE allocations SET merge_id = NULL, merge_copy = 0 WHERE id IN (?)',
+      [originals.length ? originals.map((r) => r.id) : [0]]
+    );
+    return;
+  }
+  const anchorSlot = originals[0].time_slot_id;
+  for (const slot of slots) {
+    if (Number(slot) === Number(anchorSlot)) continue;
+    await db.query(
+      `INSERT INTO allocations (alloc_date, time_slot_id, merge_id, merge_copy, ${COPY_COLS})
+       SELECT alloc_date, ?, merge_id, 1, ${COPY_COLS}
+         FROM allocations WHERE id IN (?) ORDER BY id`,
+      [slot, ids]
+    );
+  }
+}
+
+// Resync the merged cell an allocation belongs to (after it was added to,
+// edited or removed). Copies are never edited on their own: a change to one
+// is undone by rebuilding it from the originals.
+async function resyncFor(row) {
+  if (!row?.merge_id || row.batch_id == null) return;
+  await syncMerge(pool, {
+    date: row.alloc_date, program_id: row.program_id,
+    batch_id: row.batch_id, merge_id: row.merge_id,
+  });
+}
+
+// POST /api/allocations/merge { date, program_id, batch_id, slot_ids, replace? }
+// Merges adjacent cells of one batch row. The first cell (in slot order) that
+// holds a session supplies the merged cell's content; any other cell in the
+// range that has sessions is refused with code 'occupied' unless `replace` is
+// set, in which case those sessions are deleted. Cells already part of another
+// merge that overlaps the range are unmerged first.
+router.post('/merge', requireEditor, async (req, res) => {
+  const { date, program_id, batch_id, slot_ids, replace } = req.body || {};
+  if (!date || !program_id || !batch_id || !Array.isArray(slot_ids) || slot_ids.length < 2)
+    return res.status(400).json({ error: 'date, program_id, batch_id and two or more slot_ids are required' });
+
+  const [grid] = await pool.query(
+    'SELECT id FROM time_slots WHERE program_id = ? ORDER BY sort_order, id', [program_id]);
+  const order = grid.map((s) => s.id);
+  const idx = [...new Set(slot_ids.map(Number))].map((id) => order.indexOf(id)).sort((a, b) => a - b);
+  if (idx.some((i) => i === -1))
+    return res.status(400).json({ error: 'Those time slots are not in this timetable' });
+  if (idx.some((i, k) => k && i !== idx[k - 1] + 1))
+    return res.status(400).json({ error: 'Only side-by-side cells can be merged' });
+  const slots = idx.map((i) => order[i]);
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const cellWhere = `alloc_date = ? AND program_id = ? AND batch_id = ? AND time_slot_id IN (?)
+                       AND status <> 'rejected'`;
+    const cellParams = [date, program_id, batch_id, slots];
+
+    // Break up any merge touching the range; its cells outside the range keep
+    // their copies as ordinary sessions.
+    const [touching] = await conn.query(
+      `SELECT DISTINCT merge_id FROM allocations WHERE ${cellWhere} AND merge_id IS NOT NULL`,
+      cellParams
+    );
+    if (touching.length) {
+      // copies inside the range go; the new merge re-copies from its anchor
+      await conn.query(
+        `DELETE FROM allocations WHERE ${cellWhere} AND merge_copy = 1`, cellParams);
+      await conn.query(
+        `UPDATE allocations SET merge_id = NULL, merge_copy = 0
+          WHERE alloc_date = ? AND program_id = ? AND batch_id = ? AND merge_id IN (?)`,
+        [date, program_id, batch_id, touching.map((t) => t.merge_id)]
+      );
+    }
+
+    const [rows] = await conn.query(
+      `SELECT id, time_slot_id, status FROM allocations WHERE ${cellWhere} ORDER BY id`, cellParams);
+    const anchorSlot = slots.find((s) => rows.some((r) => r.time_slot_id === s && r.status === 'approved'));
+    if (!anchorSlot) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Nothing to merge — add a session to one of the cells first' });
+    }
+    const others = rows.filter((r) => r.time_slot_id !== anchorSlot && r.status === 'approved');
+    if (others.length && !replace) {
+      await conn.rollback();
+      return res.status(409).json({
+        code: 'occupied', count: others.length,
+        error: `${others.length} other session(s) in the selected cells would be replaced`,
+      });
+    }
+    if (others.length)
+      await conn.query('DELETE FROM allocations WHERE id IN (?)', [others.map((r) => r.id)]);
+
+    const anchors = rows.filter((r) => r.time_slot_id === anchorSlot);
+    const mergeId = anchors[0].id;
+    await conn.query(
+      'UPDATE allocations SET merge_id = ?, merge_copy = 0 WHERE id IN (?)',
+      [mergeId, anchors.map((r) => r.id)]
+    );
+    await syncMerge(conn, { date, program_id, batch_id, merge_id: mergeId }, slots);
+    await conn.commit();
+    res.json({ merge_id: mergeId, slots: slots.length, replaced: others.length });
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/allocations/unmerge { date, program_id, batch_id, merge_id }
+// Splits a merged cell back into its slots. Each slot keeps its session, so
+// the admin can clear or change the ones no longer wanted.
+router.post('/unmerge', requireEditor, async (req, res) => {
+  const { date, program_id, batch_id, merge_id } = req.body || {};
+  if (!date || !program_id || !batch_id || !merge_id)
+    return res.status(400).json({ error: 'date, program_id, batch_id and merge_id are required' });
+  const [r] = await pool.query(
+    `UPDATE allocations SET merge_id = NULL, merge_copy = 0
+      WHERE alloc_date = ? AND program_id = ? AND batch_id = ? AND merge_id = ?`,
+    [date, program_id, batch_id, merge_id]
+  );
+  res.json({ updated: r.affectedRows });
 });
 
 const fields = ['alloc_date', 'program_id', 'batch_id', 'activity_id',
@@ -318,6 +477,21 @@ router.post('/', requireEditor, async (req, res) => {
     `INSERT INTO allocations (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`,
     vals
   );
+  // A session added to a merged cell (a co-teacher, an activity) joins the
+  // merge, so it is copied across every slot the cell covers.
+  if (req.body.batch_id && req.body.time_slot_id) {
+    const [[m]] = await pool.query(
+      `SELECT merge_id FROM allocations
+        WHERE alloc_date = ? AND program_id = ? AND batch_id = ? AND time_slot_id = ?
+          AND merge_id IS NOT NULL AND merge_copy = 0 AND id <> ? LIMIT 1`,
+      [req.body.alloc_date, req.body.program_id, req.body.batch_id, req.body.time_slot_id, r.insertId]
+    );
+    if (m) {
+      await pool.query('UPDATE allocations SET merge_id = ? WHERE id = ?', [m.merge_id, r.insertId]);
+      const [[row]] = await pool.query('SELECT * FROM allocations WHERE id = ?', [r.insertId]);
+      await resyncFor(row);
+    }
+  }
   res.json({ id: r.insertId });
   if (req.body.faculty_id) notifyAssigned(r.insertId);  // after responding
 });
@@ -328,16 +502,22 @@ router.put('/:id', requireEditor, async (req, res) => {
 
   // Only a *change* of tutor is an assignment. Dragging a session around the
   // grid never sends faculty_id, so a move can't spam the same tutor.
-  let previousFaculty;
-  if ('faculty_id' in req.body) {
-    const [[before]] = await pool.query('SELECT faculty_id FROM allocations WHERE id = ?', [req.params.id]);
-    previousFaculty = before?.faculty_id ?? null;
-  }
+  const [[before]] = await pool.query('SELECT * FROM allocations WHERE id = ?', [req.params.id]);
+  const previousFaculty = before?.faculty_id ?? null;
 
   await pool.query(
     `UPDATE allocations SET ${sets.map((f) => `${f}=?`).join(',')} WHERE id=?`,
     [...sets.map((f) => value(f, req.body)), req.params.id]
   );
+  // An edit to a merged cell reaches all its slots. A session moved out of
+  // its cell leaves the merge (and the merge drops the copies it had).
+  if (before?.merge_id) {
+    const moved = ['alloc_date', 'program_id', 'batch_id', 'time_slot_id'].some(
+      (f) => f in req.body && String(req.body[f] ?? '') !== String(before[f] ?? ''));
+    if (moved)
+      await pool.query('UPDATE allocations SET merge_id = NULL, merge_copy = 0 WHERE id = ?', [req.params.id]);
+    await resyncFor(before);
+  }
   res.json({ ok: true });
 
   const nowFaculty = req.body.faculty_id ?? null;
@@ -358,7 +538,10 @@ router.delete('/', requireEditor, async (req, res) => {
 });
 
 router.delete('/:id', requireEditor, async (req, res) => {
+  const [[row]] = await pool.query('SELECT * FROM allocations WHERE id = ?', [req.params.id]);
   await pool.query('DELETE FROM allocations WHERE id = ?', [req.params.id]);
+  // Clearing a merged cell clears it in every slot it covers.
+  await resyncFor(row);
   res.json({ ok: true });
 });
 

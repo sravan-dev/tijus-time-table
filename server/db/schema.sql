@@ -162,8 +162,15 @@ CREATE TABLE allocations (
   decided_by    INT NULL,
   decided_at    DATETIME NULL,
   decision_note VARCHAR(255) NULL,
+  -- Merged cells (Actions → Merge): every session of a merged run of slots in
+  -- one row shares merge_id. The left-most cell's sessions are the originals
+  -- (merge_copy = 0); each other slot holds copies (merge_copy = 1) kept in
+  -- sync with them, so conflicts and tutor schedules see every slot.
+  merge_id      INT NULL,
+  merge_copy    TINYINT(1) NOT NULL DEFAULT 0,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_alloc_status (status),
+  KEY idx_alloc_merge (merge_id),
   FOREIGN KEY (program_id)   REFERENCES programs(id),
   FOREIGN KEY (batch_id)     REFERENCES batches(id)     ON DELETE SET NULL,
   FOREIGN KEY (activity_id)  REFERENCES activities(id)  ON DELETE SET NULL,

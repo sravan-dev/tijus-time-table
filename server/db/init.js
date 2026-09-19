@@ -51,6 +51,22 @@ export async function initDb() {
       console.log('[init] Added batches.sort_order (backfilled from id)');
     }
 
+    // Merged cells (Actions → Merge): allocations.merge_id groups a merged run
+    // of slots, merge_copy marks the synced copies in all but the first slot.
+    const [[mgHit]] = await pool.query(
+      `SELECT COUNT(*) AS n FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name = 'allocations' AND column_name = 'merge_id'`
+    );
+    if (!mgHit.n) {
+      await pool.query(
+        `ALTER TABLE allocations
+           ADD COLUMN merge_id INT NULL,
+           ADD COLUMN merge_copy TINYINT(1) NOT NULL DEFAULT 0,
+           ADD KEY idx_alloc_merge (merge_id)`
+      );
+      console.log('[init] Added allocations.merge_id / merge_copy');
+    }
+
     // Support tickets (tutors raise, admins reply) — added in a later release, so
     // create them here for databases provisioned before the feature existed.
     await pool.query(

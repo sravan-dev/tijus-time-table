@@ -5,6 +5,7 @@ import { useAuth, roleLabel } from './auth';
 import { useBranding } from './branding';
 import NotificationBell from './components/NotificationBell';
 import SupportButton from './components/SupportButton';
+import { ActionsProvider, ActionsMenu } from './actions';
 import Login from './pages/Login';
 import Timetable from './pages/Timetable';
 import Manage from './pages/Manage';
@@ -22,11 +23,11 @@ import KnowledgeBase from './pages/KnowledgeBase';
 const homeFor = (role) => (role === 'faculty' ? '/my-schedule' : '/timetable');
 
 function Shell({ children }) {
-  const { user, logout, isAdmin, isFaculty, hasSelfSchedule } = useAuth();
+  const { user, logout, isAdmin, isFaculty, hasSelfSchedule, canEdit } = useAuth();
   const { app_title, app_logo } = useBranding();
   const nav = useNavigate();
   return (
-    <>
+    <ActionsProvider>
       <header className="topbar no-print">
         <Link to={homeFor(user?.role)} className="brand" aria-label={`${app_title} — home`}>
           <img src={app_logo || '/logo.png'} alt={app_title} />
@@ -43,6 +44,8 @@ function Shell({ children }) {
             <>
               <NavLink to="/timetable">Timetable</NavLink>
               <NavLink to="/manage">Manage</NavLink>
+              {/* commands the current page offers, e.g. Timetable → Merge cells */}
+              {canEdit && <ActionsMenu />}
               <NavLink to="/schedule">Leave &amp; Blocks</NavLink>
               {isAdmin && <ApprovalsLink />}
               {isAdmin && <NavLink to="/users">Users</NavLink>}
@@ -67,7 +70,7 @@ function Shell({ children }) {
       </header>
       {children}
       <SupportButton />
-    </>
+    </ActionsProvider>
   );
 }
 

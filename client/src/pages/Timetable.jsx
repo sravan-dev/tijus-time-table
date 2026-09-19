@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth';
+import { usePageActions } from '../actions';
 import { useToast } from '../components/Toast';
 import AllocationModal from '../components/AllocationModal';
 import SlotModal from '../components/SlotModal';
@@ -78,6 +79,9 @@ export default function Timetable() {
   //  { type:'batch-delete', batch, allocations }                           — batch delete
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
+  // Cells picked with Shift/Ctrl+click, for Actions → Merge cells. Always
+  // within one batch row: { batchId, anchor: col, cols: [slot column indexes] }.
+  const [selection, setSelection] = useState(null);
 
   // initial reference load
   useEffect(() => {
@@ -144,13 +148,14 @@ export default function Timetable() {
 
   // Drag history is only meaningful for the grid currently on screen, so drop
   // it whenever the program or date changes.
-  useEffect(() => { setUndoStack([]); setRedoStack([]); }, [date, programId]);
+  useEffect(() => { setUndoStack([]); setRedoStack([]); setSelection(null); }, [date, programId]);
 
   // Keyboard shortcuts: Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to
   // redo the last drag move. Ignored while typing in a field or dialog.
   useEffect(() => {
     if (!canEdit) return;
     function onKey(e) {
+      if (e.key === 'Escape' && selection) { setSelection(null); return; }
       if (!(e.ctrlKey || e.metaKey)) return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
@@ -188,6 +193,10 @@ export default function Timetable() {
       })
       .filter((b) => Object.keys(b.cells).length);
   }, [batches, facultyId]);
+
+  // Merged cells per row on screen (see rowSpans).
+  const spansByRow = useMemo(
+    () => visibleBatches.map((b) => rowSpans(b, slots)), [visibleBatches, slots]);
 
   const confCount = Object.keys(data.conflicts).length;
 
@@ -648,6 +657,125 @@ export default function Timetable() {
     }
   }
 
+  // ---- Merge cells ----
+  // Shift+click selects a run of cells in a row (from the last one clicked),
+  // Ctrl/Cmd+click adds or removes a single cell. Picking a cell in another
+  // row starts over there, since a merge never spans rows.
+  function selectCell(b, ci, e) {
+    window.getSelection()?.removeAllRanges();   // Shift+click also selects text
+    if (!selection || selection.batchId !== b.id) {
+      setSelection({ batchId: b.id, anchor: ci, cols: [ci] });
+    } else if (e.shiftKey) {
+      const lo = Math.min(selection.anchor, ci), hi = Math.max(selection.anchor, ci);
+      setSelection({ ...selection, cols: Array.from({ length: hi - lo + 1 }, (_, k) => lo + k) });
+    } else {
+      const cols = selection.cols.includes(ci)
+        ? selection.cols.filter((c) => c !== ci) : [...selection.cols, ci];
+      setSelection(cols.length ? { ...selection, anchor: ci, cols } : null);
+    }
+  }
+
+  // Every slot column the given columns cover once merged cells are counted
+  // whole, sorted, with whether they form one side-by-side run.
+  function coverCols(ri, cols) {
+    const spans = spansByRow[ri] || [];
+    const all = new Set();
+    for (const c of cols) {
+      const head = spans[c]?.start ?? c;
+      for (let k = head; k < head + (spans[head]?.span || 1); k++) all.add(k);
+    }
+    const out = [...all].sort((x, y) => x - y);
+    return { cols: out, contiguous: out.every((c, k) => !k || c === out[k - 1] + 1) };
+  }
+
+  const selRow = selection ? visibleBatches.findIndex((b) => b.id === selection.batchId) : -1;
+  const selCover = selRow >= 0 ? coverCols(selRow, selection.cols) : null;
+  const canMergeSel = Boolean(selCover && selCover.cols.length > 1 && selCover.contiguous);
+  // merge ids of merged cells inside the selection
+  const selMerges = selRow >= 0
+    ? [...new Set(selCover.cols.map((c) => visibleBatches[selRow].cells[slots[c]?.id]?.merge_id)
+      .filter(Boolean))]
+    : [];
+
+  function isSelected(b, ci, span) {
+    if (!selection || selection.batchId !== b.id) return false;
+    return selection.cols.some((c) => c >= ci && c < ci + span);
+  }
+
+  // Merge the given slot columns of row `ri` into one cell. The server keeps
+  // the first cell that has a session; other sessions in the range are only
+  // replaced after the admin confirms.
+  async function mergeCols(ri, cols) {
+    const b = visibleBatches[ri];
+    const { cols: run, contiguous } = coverCols(ri, cols);
+    if (!b?.id || run.length < 2) {
+      toast('Select two or more side-by-side cells in one row (Shift+click)', 'error');
+      return;
+    }
+    if (!contiguous) { toast('Only side-by-side cells can be merged', 'error'); return; }
+    const body = {
+      date, program_id: programId, batch_id: b.id,
+      slot_ids: run.map((c) => slots[c].id),
+    };
+    setMoving(true);
+    try {
+      let r;
+      try {
+        r = await api.post('/allocations/merge', body);
+      } catch (e) {
+        const d = e.response?.data;
+        if (d?.code !== 'occupied') throw e;
+        if (!confirm(`${d.error}. Only the first cell's session is kept in the merged cell. Merge anyway?`)) return;
+        r = await api.post('/allocations/merge', { ...body, replace: true });
+      }
+      setSelection(null);
+      await reload();
+      toast(`Merged ${r.data.slots} cells (${slots[run[0]].label} – ${slots[run[run.length - 1]].label})`);
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not merge the cells', 'error');
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  // Split merged cells back into their slots; each slot keeps its session.
+  async function unmerge(batchId, mergeIds) {
+    setMoving(true);
+    try {
+      for (const id of mergeIds) {
+        await api.post('/allocations/unmerge', {
+          date, program_id: programId, batch_id: batchId, merge_id: id,
+        });
+      }
+      setSelection(null);
+      await reload();
+      toast(mergeIds.length > 1 ? `Unmerged ${mergeIds.length} cells` : 'Cells unmerged');
+    } catch (e) {
+      toast(e.response?.data?.error || 'Could not unmerge the cells', 'error');
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  // Top bar → Actions.
+  usePageActions(canEdit ? [
+    {
+      key: 'merge',
+      label: canMergeSel ? `Merge cells (${selCover.cols.length})` : 'Merge cells',
+      hint: 'Shift+click side-by-side cells in one row to select them, then merge',
+      disabled: !canMergeSel || moving,
+      run: () => mergeCols(selRow, selection.cols),
+    },
+    {
+      key: 'unmerge',
+      label: 'Unmerge cells',
+      hint: 'Select a merged cell (Ctrl+click) to split it back into its slots',
+      disabled: !selMerges.length || moving,
+      run: () => unmerge(selection.batchId, selMerges),
+    },
+    ...(selection ? [{ key: 'clear-sel', label: 'Clear selection', run: () => setSelection(null) }] : []),
+  ] : []);
+
   function selectProgram(p) {
     setProgramId(p.id);
     setSearchParams({ program: p.code }, { replace: true });
@@ -697,6 +825,22 @@ export default function Timetable() {
               disabled={moving || !redoStack.length}
               title="Redo the last undone change (Ctrl+Y)">↷ Redo</button>
           </>
+        )}
+        {canEdit && selCover && (
+          <span className="sel-bar">
+            {selCover.cols.length} cell(s) selected
+            <button className="btn sm" onClick={() => mergeCols(selRow, selection.cols)}
+              disabled={!canMergeSel || moving}
+              title={canMergeSel ? 'Merge the selected cells into one' : 'Select side-by-side cells in one row'}>
+              Merge
+            </button>
+            {selMerges.length > 0 && (
+              <button className="btn ghost sm" onClick={() => unmerge(selection.batchId, selMerges)}
+                disabled={moving}>Unmerge</button>
+            )}
+            <button className="btn ghost sm" onClick={() => setSelection(null)}
+              title="Clear the selection (Esc)">✕</button>
+          </span>
         )}
         {canEdit && data.allocations.length > 0 && (
           <button className="btn danger" onClick={clearDay} disabled={clearing}
@@ -777,10 +921,19 @@ export default function Timetable() {
                   }}>
                   {b.name}{b.count ? <span className="room"> ({b.count})</span> : null}
                 </td>
-                {slots.map((s, ci) => {
+                {slots.map((col, ci) => {
+                  // A merged cell is drawn once, spanning its slots, with the
+                  // content of its first cell (the others hold synced copies).
+                  const sp = spansByRow[ri][ci];
+                  if (!sp.span) return null;
+                  const merged = sp.span > 1;
+                  const s = sp.slotId === col.id ? col : slots.find((x) => x.id === sp.slotId);
                   const a = b.cells[s.id];
                   const extras = b.extra?.[s.id] || [];
-                  const conf = a ? data.conflicts[a.id] : null;
+                  // a merged cell shows the conflicts of every slot it covers
+                  const conf = !a ? null : !merged ? data.conflicts[a.id]
+                    : dedupeConflicts(slots.slice(ci, ci + sp.span)
+                      .flatMap((x) => data.conflicts[b.cells[x.id]?.id] || []));
                   const level = conf?.some((c) => c.level === 'error') ? 'error'
                     : conf?.length ? 'warn' : null;
                   const cellKey = (b.id ?? b.name) + ':' + s.id;
@@ -792,9 +945,11 @@ export default function Timetable() {
                     occupied: Boolean(a),
                   } : null;
                   return (
-                    <td key={s.id}>
+                    <td key={col.id} colSpan={merged ? sp.span : undefined}>
                       <div
                         className={'cell' + (level ? ' conf-' + level : '')
+                          + (merged ? ' merged' : '')
+                          + (isSelected(b, ci, sp.span) ? ' selected' : '')
                           + (dragOver === cellKey ? ' drag-over' : '')
                           + (a?.status === 'pending' ? ' pending' : '')
                           + (highlight(a) ? ' tinted' : '')
@@ -805,7 +960,11 @@ export default function Timetable() {
                         title={a?.status === 'pending'
                           ? 'Requested by the tutor — awaiting approval'
                           : (conf ? conf.map((c) => c.message).join('\n') : '')}
-                        draggable={Boolean(canEdit && a)}
+                        draggable={Boolean(canEdit && a && !merged)}
+                        onMouseDown={(e) => {
+                          // keep Shift+click from selecting the page's text
+                          if (canEdit && (e.shiftKey || e.ctrlKey || e.metaKey)) e.preventDefault();
+                        }}
                         onDragStart={(e) => {
                           if (fillRef.current) { e.preventDefault(); return; } // fill handle, not a move
                           if (!canEdit || !a) return;
@@ -830,6 +989,10 @@ export default function Timetable() {
                           // otherwise stage it for confirmation in the modal.
                           if (!src || (a && a.id === src.id)) return;
                           if (src.batch_id === b.id && src.time_slot_id === s.id) return;
+                          if (merged) {
+                            toast('Unmerge this cell before dropping a session onto it', 'error');
+                            return;
+                          }
                           setPendingMove({
                             src,
                             batch: { id: b.id, name: b.name },
@@ -837,16 +1000,20 @@ export default function Timetable() {
                             target: a || null,
                           });
                         }}
-                        onClick={() => canEdit && !moving && setEditing(
-                          a || { programId, date, batch_id: b.id, time_slot_id: s.id }
-                        )}
+                        onClick={(e) => {
+                          if (!canEdit || moving) return;
+                          if (b.id && (e.shiftKey || e.ctrlKey || e.metaKey)) { selectCell(b, ci, e); return; }
+                          setSelection(null);
+                          setEditing(a || { programId, date, batch_id: b.id, time_slot_id: s.id });
+                        }}
                         onContextMenu={(e) => {
                           if (!canEdit) return;                 // admins only
                           if (!a && !cellRef && !hasColumnAction(s.id)) return; // nothing to act on
                           e.preventDefault();
                           // An empty cell still gets a menu, so an activity can
                           // be dropped straight into a free slot.
-                          setMenu({ x: e.clientX, y: e.clientY, allocation: a, cell: cellRef, slot: s });
+                          setMenu({ x: e.clientX, y: e.clientY, allocation: a, cell: cellRef, slot: s,
+                            row: ri, col: ci, merged });
                         }}>
                         {a ? (
                           <>
@@ -887,6 +1054,7 @@ export default function Timetable() {
                                       : undefined)}
                                   onClick={(e) => {
                                     if (!canEdit || moving) return;
+                                    if (e.shiftKey || e.ctrlKey || e.metaKey) return; // selecting the cell
                                     e.stopPropagation();
                                     if (label) setEditing(x);
                                     else setActivityCell(x);
@@ -898,7 +1066,8 @@ export default function Timetable() {
                                     // `cell` as well as the session itself: once a
                                     // cell is full these lines cover it, and the
                                     // menu still has to be able to add to it.
-                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef, slot: s });
+                                    setMenu({ x: e.clientX, y: e.clientY, allocation: x, cell: cellRef, slot: s,
+                                      row: ri, col: ci, merged });
                                   }}>
                                   {label || <span className="empty-area">+ activity</span>}
                                   {x.note && label && x.note !== label && (
@@ -925,7 +1094,7 @@ export default function Timetable() {
                         )}
                         {/* Excel-style fill handle: drag it across or down to
                             copy this cell into the empty cells it passes over. */}
-                        {canEdit && a && cellRef && a.status === 'approved' && (
+                        {canEdit && a && cellRef && a.status === 'approved' && !merged && (
                           <span className="fill-handle no-print"
                             title="Drag across or down to copy this cell into empty cells"
                             onPointerDown={(e) => startFill(e, ri, ci)}
@@ -977,9 +1146,11 @@ export default function Timetable() {
                       <td className="batch">
                         {b.name}{b.count ? <span className="room"> ({b.count})</span> : null}
                       </td>
-                      {ps.map((s) => (
-                        <td key={s.id}>
-                          {b.cells[s.id] && <PrintCell a={b.cells[s.id]} extras={b.extra?.[s.id] || []} />}
+                      {rowSpans(b, ps).map((sp, ci) => sp.span > 0 && (
+                        <td key={ps[ci].id} colSpan={sp.span > 1 ? sp.span : undefined}>
+                          {b.cells[sp.slotId] && (
+                            <PrintCell a={b.cells[sp.slotId]} extras={b.extra?.[sp.slotId] || []} />
+                          )}
                         </td>
                       ))}
                     </tr>
@@ -1098,6 +1269,40 @@ export default function Timetable() {
                     )}
                   </>
                 )}
+                {menu.cell && (() => {
+                  // Merge the selection when this cell is part of it, otherwise
+                  // this cell with the one to its right.
+                  const inSel = canMergeSel && selRow === menu.row
+                    && selCover.cols.includes(menu.col);
+                  const next = menu.col + (spansByRow[menu.row]?.[menu.col]?.span || 1);
+                  return (
+                    <>
+                      <div className="ctx-sep" />
+                      {inSel ? (
+                        <button className="ctx-item"
+                          onClick={() => { setMenu(null); mergeCols(selRow, selection.cols); }}>
+                          Merge selected cells ({selCover.cols.length})
+                        </button>
+                      ) : next < slots.length && (
+                        <button className="ctx-item"
+                          onClick={() => { const m = menu; setMenu(null); mergeCols(m.row, [m.col, next]); }}>
+                          Merge with next cell ({slots[next].label})
+                        </button>
+                      )}
+                      {menu.merged && menu.allocation?.merge_id && (
+                        <button className="ctx-item"
+                          onClick={() => {
+                            const a = menu.allocation;
+                            setMenu(null);
+                            unmerge(a.batch_id, [a.merge_id]);
+                          }}>
+                          Unmerge cells
+                        </button>
+                      )}
+                      <div className="ctx-sep" />
+                    </>
+                  );
+                })()}
                 {menu.allocation && (
                   <button className="ctx-item"
                     onClick={() => { setActivityCell(menu.allocation); setMenu(null); }}>
@@ -1275,6 +1480,33 @@ function highlight(a) {
 }
 
 const isHighlighted = (a) => Boolean(highlight(a));
+
+// Merged cells in one grid row, per slot column: { start, span, slotId }.
+// The first column of a merged cell gets the full span and the slot whose
+// sessions it shows (the originals rather than the synced copies); the
+// columns it covers get span 0 and are not drawn.
+function rowSpans(b, slots) {
+  const out = [];
+  for (let ci = 0; ci < slots.length; ci++) {
+    const cur = b.cells[slots[ci].id];
+    const prev = ci ? b.cells[slots[ci - 1].id] : null;
+    if (cur?.merge_id && prev?.merge_id === cur.merge_id) {
+      const head = out[out[ci - 1].start];
+      head.span++;
+      if (!cur.merge_copy) head.slotId = slots[ci].id;
+      out.push({ start: head.start, span: 0 });
+    } else {
+      out.push({ start: ci, span: 1, slotId: slots[ci].id });
+    }
+  }
+  return out;
+}
+
+// One entry per distinct conflict message.
+function dedupeConflicts(list) {
+  const seen = new Set();
+  return list.filter((c) => !seen.has(c.message) && seen.add(c.message));
+}
 
 // Batch rows × slot columns for one program's day. Only rows for that program
 // and its current slot grid are kept, so another program's sessions can never

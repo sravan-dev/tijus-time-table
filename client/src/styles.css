@@ -50,6 +50,12 @@ a { color: var(--brand); text-decoration: none; }
   color: #d4d4ee; padding: 6px 12px; border-radius: 6px; font-size: 14px;
 }
 .topbar nav a.active, .topbar nav a:hover { background: rgba(255,255,255,.16); color: #fff; }
+/* "Actions ▾" drop-down trigger — looks like the nav links beside it */
+.topbar nav .nav-menu-btn {
+  color: #d4d4ee; padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 14px;
+  background: none; border: none; cursor: pointer;
+}
+.topbar nav .nav-menu-btn.active, .topbar nav .nav-menu-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
 .topbar .spacer { flex: 1; }
 .topbar .who { font-size: 13px; opacity: .9; }
 
@@ -201,6 +207,9 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
 }
 .cell:hover .fill-handle, .cell.fill-src .fill-handle { opacity: 1; }
 .cell.fill-src { outline: 2px solid var(--brand); }
+.cell.selected { outline: 2px solid var(--accent-blue); box-shadow: inset 0 0 0 999px rgba(0,160,224,.12); }
+.cell.merged { text-align: center; }
+.sel-bar { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .cell.fill-range { outline: 2px dashed var(--brand); background: var(--brand-tint); }
 .page.filling, .page.filling * { cursor: crosshair !important; user-select: none; }
 /* a split area with nothing in it yet */
@@ -284,6 +293,8 @@ table.tt tr.row-drag-below td { border-bottom: 3px solid var(--brand); }
 .ctx-item:hover { background: var(--brand-tint); }
 .ctx-sep { height: 1px; background: var(--line); margin: 4px 2px; }
 .ctx-item.danger { color: var(--error); }
+.ctx-item:disabled { color: var(--muted); cursor: default; background: none; }
+.ctx-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; max-width: 240px; white-space: normal; }
 .ctx-item.danger:hover { background: var(--error-bg); }
 .field { margin-bottom: 12px; display:flex; flex-direction:column; gap:4px; }
 .field label { font-size: 12px; color: var(--muted); font-weight:600; }
