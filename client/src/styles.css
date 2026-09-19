@@ -160,12 +160,12 @@ table.tt td.batch, table.tt th.batch {
 .cell .room { color: var(--muted); font-weight: 700; }
 /* free-text note on a session, shown beside the activity code */
 .cell .note, .act-preview .note {
-  font-weight: 500; font-size: 11.5px; color: var(--muted); font-style: italic;
+  font-weight: 700; font-size: 11.5px; color: var(--muted); font-style: italic;
   margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 110px; display: inline-block; vertical-align: bottom;
   padding: 0 4px; border-radius: 4px;
 }
-.cell .note[style], .act-preview .note[style] { font-style: normal; font-weight: 600; }
+.cell .note[style], .act-preview .note[style] { font-style: normal; font-weight: 700; }
 /* an additional faculty (second session in the same cell) */
 .cell .fac.extra { border-top: 1px dashed var(--line); margin-top: 2px; padding-top: 2px; font-weight: 700; }
 .cell .fac.extra:hover { text-decoration: underline; }
